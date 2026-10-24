@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  /* 温暖信纸感 · 设计基调（ONE-173 定稿，全站沿用） */
+  --color-paper-50: #fdfaf4;
+  --color-paper-100: #faf4e8;
+  --color-paper-200: #f3e9d5;
+  --color-paper-300: #ead9bb;
+
+  --color-ink-500: #8a7a63;
+  --color-ink-600: #6f6150;
+  --color-ink-700: #57503f;
+  --color-ink-900: #3a352a;
+
+  --color-seal-500: #c25644;
+  --color-seal-600: #a84434;
+
+  --font-serif: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --font-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+  --radius-card: 6px;
+}
+
+:root {
+  --background: var(--color-paper-100);
+  --foreground: var(--color-ink-900);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
