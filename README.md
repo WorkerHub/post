@@ -21,7 +21,38 @@ pnpm dev:worker
 pnpm dev:web
 ```
 
-Worker 本地首次运行会提示创建本地 D1；需要绑定真实 D1 时在 `worker/` 下用 `wrangler` 登录后配置（见 `worker/wrangler.toml`）。
+### Worker 本地环境变量
+
+复制模板后按需修改（`.dev.vars` 已被 gitignore，仅本地生效）：
+
+```bash
+cp worker/.dev.vars.example worker/.dev.vars
+```
+
+- `JWT_SECRET`：会话签名密钥
+- `SETUP_SECRET`：首次部署创建管理员账号所需的密钥（`X-Setup-Secret` 请求头）
+
+两个密钥均至少 16 字符；未配置/过短/占位符时 fail-safe 拒绝全部 `/api/*`（500 `Server misconfigured`）。密钥不进 `wrangler.toml [vars]`：本地走 `.dev.vars`，线上走 `wrangler secret put`。
+
+### D1 迁移
+
+首次本地运行前应用迁移（miniflare 本地库，不碰线上）：
+
+```bash
+cd worker
+pnpm exec wrangler d1 migrations apply D1_DATABASE_NAME_PLACEHOLDER --local
+```
+
+全新部署也可不预先迁移：`POST /api/setup` 会在建管理员时内联建表（幂等，与迁移文件同一份 schema，`worker/test/schema.test.ts` 保证两者一致）。
+
+线上库迁移（需用户批准后执行）：`wrangler d1 migrations apply <database_name> --remote`。
+
+### 账号体系（stage 2）
+
+- 首次部署：`GET /api/setup/state` → `{enabled:true}`；`POST /api/setup`（`X-Setup-Secret` 头 + email/password）创建第一个账号，即管理员；创建后 setup 关闭，开放注册永不产生管理员。
+- 注册：`POST /api/auth/register` 开放，但新账号默认 `approval_status=pending`，登录被拒；管理员 `PUT /api/admin/users/:id/approve` 批准后才能登录。
+- 登录：密码 + 可选 TOTP/Passkey 二步验证；会话为 HttpOnly Cookie（access 24h / refresh 7d，SameSite=Strict）。
+- 用户自服务：`/api/me`（昵称/时区/语言、改密码、会话管理）；管理员：`/api/admin/users`（批准/禁用/角色）。
 
 ## 校验命令（CI 同款）
 
@@ -37,8 +68,10 @@ pnpm test        # worker 单测（vitest）
 
 部署所需配置（未配置时 workflow 会失败，见下）：
 
-- Repository secret：`CLOUDFLARE_API_TOKEN`（Workers/D1 部署权限）
-- Repository variables：`CLOUDFLARE_ACCOUNT_ID`、`D1_DATABASE_NAME`、`D1_DATABASE_ID`
+- Repository secret：`CLOUDFLARE_API_TOKEN`（Workers/D1/KV 部署权限）
+- Repository variables：`CLOUDFLARE_ACCOUNT_ID`、`D1_DATABASE_NAME`、`D1_DATABASE_ID`、`KV_NAMESPACE_ID`
+- Worker secrets（部署后执行一次）：`wrangler secret put JWT_SECRET`、`wrangler secret put SETUP_SECRET`
+- 线上 D1 迁移：首次部署后执行 `wrangler d1 migrations apply <database_name> --remote`（对线上库的写操作需用户拍板）
 
 本地手动部署：`pnpm deploy`（内部替换 wrangler.toml 占位符后 `wrangler deploy`）。域名 `post.oneboy.app` 的绑定在部署阶段处理。
 
@@ -46,6 +79,7 @@ pnpm test        # worker 单测（vitest）
 
 ```
 web/      前端（@post/web）
-worker/   Cloudflare Worker（@post/worker，Hono + D1 + cron）
+worker/   Cloudflare Worker（@post/worker，Hono + D1 + KV + cron）
+  migrations/   D1 迁移（与 src/db/schema.ts 同步）
 scripts/  部署辅助脚本
 ```

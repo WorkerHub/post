@@ -2,11 +2,52 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import type { Env, HonoEnv } from "./types";
+import { setupRoutes } from "./routes/setup";
+import { authRoutes } from "./routes/auth";
+import { auth2faRoutes } from "./routes/auth2fa";
+import { meRoutes } from "./routes/me";
+import { adminRoutes } from "./routes/admin";
 
 export const app = new Hono<HonoEnv>();
 
 app.use("*", logger());
 app.use("*", secureHeaders());
+
+app.onError((err, c) => {
+  console.error("Unhandled error:", err);
+  if (err instanceof SyntaxError) {
+    return c.json({ error: "Invalid request body" }, 400);
+  }
+  return c.json({ error: "Internal server error" }, 500);
+});
+
+// eNotify 同款 fail-safe + 占位符防绕过（ONE-192 Blocking）：敏感密钥未配置/过短/含占位符时
+// 拒绝全部 API 服务。密钥只能来自 wrangler secret（线上）或 .dev.vars（本地），不得是 [vars] 占位符。
+app.use("/api/*", async (c, next) => {
+  const secrets: [string, string | undefined][] = [
+    ["JWT_SECRET", c.env.JWT_SECRET],
+    ["SETUP_SECRET", c.env.SETUP_SECRET],
+  ];
+  for (const [name, secret] of secrets) {
+    if (
+      !secret ||
+      secret.length < 16 ||
+      secret.endsWith("_PLACEHOLDER")
+    ) {
+      console.error(
+        `${name} is missing, too short, or still a placeholder`,
+      );
+      return c.json({ error: "Server misconfigured" }, 500);
+    }
+  }
+  await next();
+});
+
+app.route("/api/setup", setupRoutes);
+app.route("/api/auth", authRoutes);
+app.route("/api/auth/2fa", auth2faRoutes);
+app.route("/api/me", meRoutes);
+app.route("/api/admin", adminRoutes);
 
 app.get("/api/health", (c) =>
   c.json({ status: "ok", timestamp: new Date().toISOString() }),
