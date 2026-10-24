@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth";
 import { auth2faRoutes } from "./routes/auth2fa";
 import { meRoutes } from "./routes/me";
 import { adminRoutes } from "./routes/admin";
+import { processDueLetters } from "./services/scheduler";
 
 export const app = new Hono<HonoEnv>();
 
@@ -70,10 +71,15 @@ app.get("*", async (c) => {
 
 /**
  * 定时任务入口（cron 每 5 分钟一次，见 wrangler.toml）。
- * 占位实现：调度扫描与抢占发送逻辑在后续任务中实现。
+ * SPEC §5：扫 status='scheduled' AND send_at<=now，D1 状态抢占 + 逐收件人投递。
  */
-export async function handleScheduled(_env: Env): Promise<void> {
-  // no-op placeholder
+export async function handleScheduled(env: Env): Promise<void> {
+  try {
+    const stats = await processDueLetters(env);
+    console.info("scheduled delivery run:", stats);
+  } catch (err) {
+    console.error("scheduled delivery failed:", err);
+  }
 }
 
 export default {

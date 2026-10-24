@@ -108,11 +108,11 @@ export class SqliteD1 {
     bind: (...args: unknown[]) => {
       first: <T>() => Promise<T | null>;
       all: <T>() => Promise<{ results: T[] }>;
-      run: () => Promise<{ success: boolean }>;
+      run: () => Promise<{ success: boolean; meta: { changes: number } }>;
     };
     first: <T>() => Promise<T | null>;
     all: <T>() => Promise<{ results: T[] }>;
-    run: () => Promise<{ success: boolean }>;
+    run: () => Promise<{ success: boolean; meta: { changes: number } }>;
   } {
     const statement = () => this.db.prepare(sql);
     const wrap = (args: unknown[]) => ({
@@ -122,8 +122,8 @@ export class SqliteD1 {
         results: statement().all(...(args as never[])) as T[],
       }),
       run: async () => {
-        statement().run(...(args as never[]));
-        return { success: true };
+        const result = statement().run(...(args as never[]));
+        return { success: true, meta: { changes: Number(result.changes) } };
       },
     });
     return {
