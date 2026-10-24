@@ -1,0 +1,26 @@
+{
+  "name": "post",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "时光邮局 — 在未来某个日期时间，把一封信寄到指定邮箱（post.oneboy.app）",
+  "scripts": {
+    "dev": "concurrently \"pnpm dev:worker\" \"pnpm dev:web\"",
+    "dev:web": "pnpm --filter @post/web dev",
+    "dev:worker": "pnpm --filter @post/worker dev",
+    "build": "pnpm --filter @post/web build && pnpm --filter @post/worker build",
+    "build:web": "pnpm --filter @post/web build",
+    "build:worker": "pnpm --filter @post/worker build",
+    "typecheck": "pnpm --filter @post/web typecheck && pnpm --filter @post/worker typecheck",
+    "test": "pnpm --filter @post/worker test",
+    "deploy": "pnpm build:web && node scripts/deploy.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "typescript": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@12.14.0"
+}
