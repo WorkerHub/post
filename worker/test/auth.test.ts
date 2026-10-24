@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { setupRoutes } from "../src/routes/setup";
+import type { HonoEnv } from "../src/types";
+import { countUsers, listUsers } from "../src/db/queries/users";
 import {
   cookieHeader,
   cookieValue,
@@ -317,5 +321,154 @@ describe("me 路由（昵称/时区/语言/改密码）", () => {
       jsonInit("POST", { email: "admin@example.com", password: "new-password-123" }),
     );
     expect(newLogin.status).toBe(200);
+  });
+});
+
+describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
+  it.each([
+    ["placeholder 值", "SETUP_SECRET_PLACEHOLDER"],
+    ["过短", "short"],
+  ])(
+    "SETUP_SECRET %s → /api/* 一律 500，占位符回传无法建号提权",
+    async (_label, bad) => {
+      const env = makeEnv({ SETUP_SECRET: bad });
+
+      // Tony 的复现路径：X-Setup-Secret 回传占位符本身
+      const setup = await request(
+        env,
+        "/api/setup",
+        jsonInit(
+          "POST",
+          { email: "attacker@example.com", password: "admin-password-123" },
+          { "X-Setup-Secret": "SETUP_SECRET_PLACEHOLDER" },
+        ),
+      );
+      expect(setup.status).toBe(500);
+      expect(setup.body).toEqual({ error: "Server misconfigured" });
+
+      // 其余 API 同样被 fail-safe 拦截
+      expect((await request(env, "/api/health")).status).toBe(500);
+      expect((await request(env, "/api/setup/state")).status).toBe(500);
+      expect(
+        (
+          await request(
+            env,
+            "/api/auth/register",
+            jsonInit("POST", { email: "x@example.com", password: "user-password-123" }),
+          )
+        ).status,
+      ).toBe(500);
+
+      // 建号确实没有发生
+      expect(await countUsers(env.DB)).toBe(0);
+    },
+  );
+
+  it("SETUP_SECRET 缺失 → /api/* 一律 500，无法建号", async () => {
+    const env = makeEnv({ SETUP_SECRET: undefined });
+    const setup = await request(
+      env,
+      "/api/setup",
+      jsonInit(
+        "POST",
+        { email: "attacker@example.com", password: "admin-password-123" },
+        setupSecretHeader(),
+      ),
+    );
+    expect(setup.status).toBe(500);
+    expect((await request(env, "/api/health")).status).toBe(500);
+    expect(await countUsers(env.DB)).toBe(0);
+  });
+
+  it.each([
+    ["placeholder 值", "JWT_SECRET_PLACEHOLDER"],
+    ["过短", "short"],
+    ["缺失", undefined],
+  ])("JWT_SECRET %s → /api/* 一律 500", async (_label, bad) => {
+    const env = makeEnv({ JWT_SECRET: bad });
+    expect((await request(env, "/api/health")).status).toBe(500);
+    const setup = await request(
+      env,
+      "/api/setup",
+      jsonInit(
+        "POST",
+        { email: "attacker@example.com", password: "admin-password-123" },
+        setupSecretHeader(),
+      ),
+    );
+    expect(setup.status).toBe(500);
+    expect(await countUsers(env.DB)).toBe(0);
+  });
+
+  it("路由层防守校验独立生效（不经 fail-safe 中间件，双保险）", async () => {
+    for (const bad of [
+      "SETUP_SECRET_PLACEHOLDER",
+      "",
+      undefined,
+    ] as (string | undefined)[]) {
+      const bare = new Hono<HonoEnv>();
+      bare.route("/api/setup", setupRoutes);
+      const env = makeEnv({ SETUP_SECRET: bad });
+      const res = await bare.request(
+        "/api/setup",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Setup-Secret": "SETUP_SECRET_PLACEHOLDER",
+          },
+          body: JSON.stringify({
+            email: "attacker@example.com",
+            password: "admin-password-123",
+          }),
+        },
+        env,
+      );
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "Server misconfigured" });
+      expect(await countUsers(env.DB)).toBe(0);
+    }
+  });
+});
+
+describe("并发 setup 竞态（ONE-192 Should-fix）", () => {
+  it("只有一个请求能建出管理员，后到请求 403 且不留垃圾行", async () => {
+    const env = makeEnv();
+    const [a, b] = await Promise.all([
+      request(
+        env,
+        "/api/setup",
+        jsonInit(
+          "POST",
+          { email: "first@example.com", password: "admin-password-123" },
+          setupSecretHeader(),
+        ),
+      ),
+      request(
+        env,
+        "/api/setup",
+        jsonInit(
+          "POST",
+          { email: "second@example.com", password: "admin-password-123" },
+          setupSecretHeader(),
+        ),
+      ),
+    ]);
+
+    // 一个 201（胜者建出 admin），一个 403（后到者不误报成功）
+    expect([a.status, b.status].sort()).toEqual([201, 403]);
+    const loser = a.status === 403 ? a : b;
+    expect(loser.body).toEqual({ error: "Setup is closed" });
+
+    // 库里只有胜者一个 admin；竞态插入的 user 行已被清理
+    const users = await listUsers(env.DB);
+    expect(users).toHaveLength(1);
+    expect(users[0].role).toBe("admin");
+    expect(users[0].approval_status).toBe("approved");
+
+    // setup 已关闭
+    expect((await request(env, "/api/setup/state")).body).toEqual({
+      enabled: false,
+    });
   });
 });

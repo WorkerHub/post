@@ -1,5 +1,5 @@
 -- post 时光邮局 schema v1（SPEC §4，落地后冻结）
--- 由 worker/src/db/schema.ts 的 SCHEMA_SQL 生成（test/schema-sync.test.ts 校验一致）。
+-- 由 worker/src/db/schema.ts 的 SCHEMA_SQL 生成（test/schema.test.ts 校验一致）。
 -- 鉴权表对齐 WorkerHub/eNotify 现行 main；按 SPEC 增补 approval_status / display_name。
 
 CREATE TABLE IF NOT EXISTS users (

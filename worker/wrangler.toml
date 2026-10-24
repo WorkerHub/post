@@ -22,11 +22,10 @@ migrations_dir = "migrations"
 binding = "KV"
 id = "KV_NAMESPACE_ID_PLACEHOLDER"
 
-[vars]
-# 占位符：本地开发用 worker/.dev.vars 覆盖；线上用 wrangler secret put 配置。
-# JWT_SECRET 至少 16 字符；SETUP_SECRET 用于首次部署创建管理员账号（X-Setup-Secret 头）。
-JWT_SECRET = "JWT_SECRET_PLACEHOLDER"
-SETUP_SECRET = "SETUP_SECRET_PLACEHOLDER"
+# 敏感密钥不放 [vars]（ONE-192）：占位符值一旦随部署发出，回传同值即可过 safeEqual 越权。
+# 本地开发用 worker/.dev.vars（见 .dev.vars.example，已被 gitignore）；
+# 线上用 `wrangler secret put JWT_SECRET` / `wrangler secret put SETUP_SECRET`（均至少 16 字符）。
+# 未配置/过短/占位符时 fail-safe：所有 /api/* 一律 500（见 src/index.ts）。
 
 [triggers]
 crons = ["*/5 * * * *"]

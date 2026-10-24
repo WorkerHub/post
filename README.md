@@ -29,8 +29,10 @@ pnpm dev:web
 cp worker/.dev.vars.example worker/.dev.vars
 ```
 
-- `JWT_SECRET`：会话签名密钥（至少 16 字符，未配置/占位符时所有 `/api/*` 返回 500）
+- `JWT_SECRET`：会话签名密钥
 - `SETUP_SECRET`：首次部署创建管理员账号所需的密钥（`X-Setup-Secret` 请求头）
+
+两个密钥均至少 16 字符；未配置/过短/占位符时 fail-safe 拒绝全部 `/api/*`（500 `Server misconfigured`）。密钥不进 `wrangler.toml [vars]`：本地走 `.dev.vars`，线上走 `wrangler secret put`。
 
 ### D1 迁移
 

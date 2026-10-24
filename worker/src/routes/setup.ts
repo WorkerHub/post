@@ -7,6 +7,7 @@ import { SCHEMA_SQL } from "../db/schema";
 import {
   countUsers,
   createUserFirstIsAdmin,
+  deleteUser,
   findUserByEmail,
   findUserById,
 } from "../db/queries/users";
@@ -41,11 +42,15 @@ setupRoutes.post(
   "/",
   rateLimit({ max: 3, window: 600, keyPrefix: "setup" }),
   async (c) => {
+    // 防守校验（ONE-192 Blocking#2）：占位符/缺失的 SETUP_SECRET 严禁当作有效密钥参与比对，
+    // 否则部署带上 [vars] 占位符值时，攻击者回传同值即可越权建号提权。
+    const envSecret = c.env.SETUP_SECRET;
+    if (!envSecret || envSecret.endsWith("_PLACEHOLDER")) {
+      return c.json({ error: "Server misconfigured" }, 500);
+    }
+
     const secret = c.req.header("X-Setup-Secret");
-    if (
-      !c.env.SETUP_SECRET ||
-      !(await safeEqual(secret ?? "", c.env.SETUP_SECRET))
-    ) {
+    if (!secret || !(await safeEqual(secret, envSecret))) {
       return c.json({ error: "Invalid setup secret" }, 403);
     }
 
@@ -94,10 +99,17 @@ setupRoutes.post(
       throw err;
     }
 
+    // 回读核验（ONE-192 Should-fix）：并发 setup 时后到请求落库为 user/pending，
+    // 不得误报 201 成功；顺手清掉本次竞态插入的无用行（id 是本次请求独有的）。
+    const user = await findUserById(c.env.DB, id);
+    if (!user || user.role !== "admin") {
+      await deleteUser(c.env.DB, id);
+      return c.json({ error: "Setup is closed" }, 403);
+    }
+
     await closeSetup(c.env);
 
-    const user = await findUserById(c.env.DB, id);
-    return c.json({ success: true, user: publicUser(user!) }, 201);
+    return c.json({ success: true, user: publicUser(user) }, 201);
   },
 );
 

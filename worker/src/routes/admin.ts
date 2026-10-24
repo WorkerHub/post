@@ -104,8 +104,11 @@ adminRoutes.put("/users/:uid", async (c) => {
   }
 
   const updates: Record<string, unknown> = {};
-  if (body.role !== undefined && ["admin", "user"].includes(body.role))
+  if (body.role !== undefined) {
+    if (body.role !== "admin" && body.role !== "user")
+      return c.json({ error: "Invalid role" }, 400);
     updates.role = body.role;
+  }
   if (body.is_active !== undefined)
     updates.is_active = body.is_active ? 1 : 0;
   if (body.email !== undefined) {

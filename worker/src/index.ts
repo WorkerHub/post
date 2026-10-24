@@ -21,12 +21,24 @@ app.onError((err, c) => {
   return c.json({ error: "Internal server error" }, 500);
 });
 
-// eNotify 同款：JWT_SECRET 未配置/过短/占位符时拒绝 API 服务
+// eNotify 同款 fail-safe + 占位符防绕过（ONE-192 Blocking）：敏感密钥未配置/过短/含占位符时
+// 拒绝全部 API 服务。密钥只能来自 wrangler secret（线上）或 .dev.vars（本地），不得是 [vars] 占位符。
 app.use("/api/*", async (c, next) => {
-  const secret = c.env.JWT_SECRET;
-  if (!secret || secret.length < 16 || secret.endsWith("_PLACEHOLDER")) {
-    console.error("JWT_SECRET is missing, too short, or still a placeholder");
-    return c.json({ error: "Server misconfigured" }, 500);
+  const secrets: [string, string | undefined][] = [
+    ["JWT_SECRET", c.env.JWT_SECRET],
+    ["SETUP_SECRET", c.env.SETUP_SECRET],
+  ];
+  for (const [name, secret] of secrets) {
+    if (
+      !secret ||
+      secret.length < 16 ||
+      secret.endsWith("_PLACEHOLDER")
+    ) {
+      console.error(
+        `${name} is missing, too short, or still a placeholder`,
+      );
+      return c.json({ error: "Server misconfigured" }, 500);
+    }
   }
   await next();
 });

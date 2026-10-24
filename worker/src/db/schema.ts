@@ -2,7 +2,7 @@
 // 鉴权表结构对齐 WorkerHub/eNotify 现行 main；
 // eNotify 独有的 base_currency/theme 等字段不带入，按 SPEC 增补 approval_status / display_name。
 //
-// 同一份 SQL 同时用于两处，test/schema-sync.test.ts 保证两者一致：
+// 同一份 SQL 同时用于两处，test/schema.test.ts 保证两者一致：
 // - migrations/0001_init.sql：wrangler d1 migrations（本地/线上迁移）
 // - setup 接口内联建表（全新部署初始化）
 
