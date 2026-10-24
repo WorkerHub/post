@@ -38,12 +38,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
         run: |
           APP_VERSION="$(node -p "require('../package.json').version")" \
           perl -pi -e '
             s/CLOUDFLARE_ACCOUNT_ID_PLACEHOLDER/$ENV{CLOUDFLARE_ACCOUNT_ID}/g;
             s/D1_DATABASE_NAME_PLACEHOLDER/$ENV{D1_DATABASE_NAME}/g;
             s/D1_DATABASE_ID_PLACEHOLDER/$ENV{D1_DATABASE_ID}/g;
+            s/KV_NAMESPACE_ID_PLACEHOLDER/$ENV{KV_NAMESPACE_ID}/g;
             s/__APP_VERSION__/'\''$ENV{APP_VERSION}'\''/g;
           ' wrangler.toml
 

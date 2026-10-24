@@ -2,11 +2,40 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import type { Env, HonoEnv } from "./types";
+import { setupRoutes } from "./routes/setup";
+import { authRoutes } from "./routes/auth";
+import { auth2faRoutes } from "./routes/auth2fa";
+import { meRoutes } from "./routes/me";
+import { adminRoutes } from "./routes/admin";
 
 export const app = new Hono<HonoEnv>();
 
 app.use("*", logger());
 app.use("*", secureHeaders());
+
+app.onError((err, c) => {
+  console.error("Unhandled error:", err);
+  if (err instanceof SyntaxError) {
+    return c.json({ error: "Invalid request body" }, 400);
+  }
+  return c.json({ error: "Internal server error" }, 500);
+});
+
+// eNotify 同款：JWT_SECRET 未配置/过短/占位符时拒绝 API 服务
+app.use("/api/*", async (c, next) => {
+  const secret = c.env.JWT_SECRET;
+  if (!secret || secret.length < 16 || secret.endsWith("_PLACEHOLDER")) {
+    console.error("JWT_SECRET is missing, too short, or still a placeholder");
+    return c.json({ error: "Server misconfigured" }, 500);
+  }
+  await next();
+});
+
+app.route("/api/setup", setupRoutes);
+app.route("/api/auth", authRoutes);
+app.route("/api/auth/2fa", auth2faRoutes);
+app.route("/api/me", meRoutes);
+app.route("/api/admin", adminRoutes);
 
 app.get("/api/health", (c) =>
   c.json({ status: "ok", timestamp: new Date().toISOString() }),

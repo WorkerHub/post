@@ -5,6 +5,9 @@ import type { Env } from "../src/types";
 const mockEnv = (indexHtml: string): Env =>
   ({
     DB: {} as D1Database,
+    KV: {} as KVNamespace,
+    JWT_SECRET: "unit-test-jwt-secret-0123456789",
+    SETUP_SECRET: "unit-test-setup-secret",
     ASSETS: {
       fetch: async (input: RequestInfo | URL): Promise<Response> => {
         const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
@@ -18,7 +21,7 @@ const mockEnv = (indexHtml: string): Env =>
 
 describe("health", () => {
   it("returns ok", async () => {
-    const res = await app.request("/api/health");
+    const res = await app.request("/api/health", undefined, mockEnv("<html>index</html>"));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "ok" });
   });
@@ -26,7 +29,7 @@ describe("health", () => {
 
 describe("api fallback", () => {
   it("returns JSON 404 for unknown /api/* instead of index.html", async () => {
-    const res = await app.request("/api/does-not-exist");
+    const res = await app.request("/api/does-not-exist", undefined, mockEnv("<html>index</html>"));
     expect(res.status).toBe(404);
     expect(res.headers.get("content-type")).toContain("application/json");
     expect(await res.json()).toEqual({ error: "Not found" });

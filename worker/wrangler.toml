@@ -16,6 +16,17 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "D1_DATABASE_NAME_PLACEHOLDER"
 database_id = "D1_DATABASE_ID_PLACEHOLDER"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "KV_NAMESPACE_ID_PLACEHOLDER"
+
+[vars]
+# 占位符：本地开发用 worker/.dev.vars 覆盖；线上用 wrangler secret put 配置。
+# JWT_SECRET 至少 16 字符；SETUP_SECRET 用于首次部署创建管理员账号（X-Setup-Secret 头）。
+JWT_SECRET = "JWT_SECRET_PLACEHOLDER"
+SETUP_SECRET = "SETUP_SECRET_PLACEHOLDER"
 
 [triggers]
 crons = ["*/5 * * * *"]

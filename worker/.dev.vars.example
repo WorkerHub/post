@@ -1,0 +1,4 @@
+# 本地开发环境变量模板：复制为 worker/.dev.vars（已被 .gitignore 忽略）
+# 线上请用 `wrangler secret put JWT_SECRET` / `wrangler secret put SETUP_SECRET` 配置。
+JWT_SECRET=test-jwt-secret-0123456789abcdef
+SETUP_SECRET=local-dev-setup-secret

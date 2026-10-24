@@ -10,10 +10,12 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^14.0.0",
     "hono": "^4.7.9"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.0.0",
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.0",
     "vitest": "^5.0.5",
     "wrangler": "^4.14.1"
