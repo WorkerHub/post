@@ -19,16 +19,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-dvh">
       <header className="border-b border-paper-300 bg-paper-50">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-6 px-4">
-          <Link to="/" className="flex items-center gap-2 text-ink-900">
+          <Link to="/" className="flex shrink-0 items-center gap-2 text-ink-900">
             <Mail className="size-5 text-seal-500" />
             <span className="font-serif text-lg font-semibold">时光邮局</span>
           </Link>
-          <nav className="flex flex-1 items-center gap-1">
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
             {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
+                className={`flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
                   pathname.startsWith(to)
                     ? "bg-paper-200 font-medium text-ink-900"
                     : "text-ink-600 hover:bg-paper-200 hover:text-ink-900"
@@ -42,6 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Button
             variant="ghost"
             size="sm"
+            className="shrink-0"
             onClick={() => clear()}
             aria-label="退出登录"
           >

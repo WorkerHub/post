@@ -5,9 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** 邮箱打码：***@gmail.com */
-export function maskEmail(email: string): string {
-  return `***@${email.split("@")[1] ?? ""}`;
+/** 邮箱打码：***@gmail.com；无域名部分或空值时返回空串，不产生悬挂的 "***@" */
+export function maskEmail(email: string | null | undefined): string {
+  if (!email) return "";
+  const domain = email.split("@")[1];
+  if (!domain) return "";
+  return `***@${domain}`;
 }
 
 /** YYYY-MM-DD 或空串 */
