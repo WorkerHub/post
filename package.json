@@ -12,7 +12,7 @@
     "build:web": "pnpm --filter @post/web build",
     "build:worker": "pnpm --filter @post/worker build",
     "typecheck": "pnpm --filter @post/web typecheck && pnpm --filter @post/worker typecheck",
-    "test": "pnpm --filter @post/worker test",
+    "test": "pnpm --filter @post/web test && pnpm --filter @post/worker test",
     "deploy": "pnpm build:web && node scripts/deploy.mjs"
   },
   "devDependencies": {
