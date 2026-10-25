@@ -15,6 +15,7 @@ import { fetchPublicLetters } from "@/api/public";
 import type { PublicLetter } from "@/api/types";
 import { SAMPLE_LETTERS } from "@/data/sample-letters";
 import { formatDate } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/version";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStore } from "@/store/setup";
 
@@ -171,7 +172,7 @@ export default function PublicWallPage() {
       </main>
 
       <footer className="border-t border-paper-300 py-6 text-center text-xs text-ink-500">
-        时光邮局 · post.oneboy.app — 小圈子多用户的定时寄信服务
+        {APP_VERSION}
       </footer>
     </div>
   );

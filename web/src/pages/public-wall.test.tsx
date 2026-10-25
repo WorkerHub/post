@@ -9,6 +9,7 @@ import type { MeProfile } from "@/api/settings";
 import { SAMPLE_LETTERS } from "@/data/sample-letters";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStore } from "@/store/setup";
+import { APP_VERSION } from "@/lib/version";
 
 vi.mock("@/api/public", () => ({
   fetchPublicLetters: vi.fn(),
@@ -100,6 +101,17 @@ describe("公开信墙渲染状态族（先等数据加载完成再断言）", (
     for (const title of SAMPLE_TITLES) {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
+  });
+
+  it("footer 只展示构建期版本号（ONE-333）", async () => {
+    mockApi([]);
+    const { container } = renderApp();
+    expect(await screen.findByText("128")).toBeInTheDocument();
+    const footer = container.querySelector("footer");
+    expect(footer).not.toBeNull();
+    expect(footer).toHaveTextContent(APP_VERSION);
+    // 原 footer 文案已整体替换，不再残留
+    expect(footer).not.toHaveTextContent("的定时寄信服务");
   });
 
   it("1 封真实信：真实信无 Badge，补位 2 封示例信带 Badge", async () => {
