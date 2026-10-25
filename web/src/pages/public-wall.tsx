@@ -13,8 +13,8 @@ import {
 } from "@/components/ui/card";
 import { fetchPublicLetters } from "@/api/public";
 import type { PublicLetter } from "@/api/types";
-import { SAMPLE_LETTERS, buildMockResponse } from "@/data/sample-letters";
-import { formatDate, maskEmail } from "@/lib/utils";
+import { SAMPLE_LETTERS } from "@/data/sample-letters";
+import { formatDate } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 
 const SITE_INTRO = "写一封信，寄往未来的某一天。";
@@ -60,7 +60,7 @@ function LetterCard({
           )}
         </span>
         <span>
-          {authorName} → {maskEmail(letter.recipient_masked)}
+          {authorName} → {letter.recipient_masked}
         </span>
       </CardFooter>
     </Card>
@@ -73,6 +73,7 @@ export default function PublicWallPage() {
     total_sent: number;
     letters: PublicLetter[];
   } | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,9 +82,11 @@ export default function PublicWallPage() {
         const result = await fetchPublicLetters();
         if (!cancelled) setData(result);
       } catch {
-        // 后端公开接口就绪前 fetch 失败时兜底为首访空墙 mock，
-        // 由 SAMPLE_LETTERS 补位；后端就绪后移除本 catch 分支。
-        if (!cancelled) setData(buildMockResponse());
+        // 失败不伪造数据（不再回退 mock total_sent）：置空墙并给出错误提示
+        if (!cancelled) {
+          setData({ total_sent: 0, letters: [] });
+          setError(true);
+        }
       }
     };
     void load();
@@ -136,6 +139,11 @@ export default function PublicWallPage() {
 
         <section className="mt-12">
           <h2 className="sr-only">公开信墙</h2>
+          {error && (
+            <p className="mb-6 text-center text-sm text-ink-500">
+              公开信墙暂时无法加载，请稍后再试。
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {letters.map((letter: PublicLetter) => (
               <LetterCard key={letter.id} letter={letter} />

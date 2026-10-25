@@ -128,10 +128,11 @@ describe("公开信墙渲染状态族（先等数据加载完成再断言）", (
     }
   });
 
-  it("API 失败时兜底空墙 mock：3 封示例信带 Badge", async () => {
+  it("API 失败时不伪造数据：错误提示 + 空墙示例信，无伪造 128", async () => {
     vi.mocked(fetchPublicLetters).mockRejectedValue(new Error("network"));
     renderApp();
-    expect(await screen.findByText("128")).toBeInTheDocument();
+    expect(await screen.findByText(/公开信墙暂时无法加载/)).toBeInTheDocument();
+    expect(screen.queryByText("128")).not.toBeInTheDocument();
     expect(screen.getAllByText("示例")).toHaveLength(3);
   });
 
