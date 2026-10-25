@@ -4,7 +4,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { ArrowLeft, KeyRound, Mail, ShieldCheck } from "lucide-react";
 
-import { authApi, IS_MOCK } from "@/api/client";
+import { authApi, IS_MOCK, settingsApi } from "@/api/client";
 import type { MeProfile } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,8 +39,19 @@ export default function LoginPage() {
   }
 
 
-  const finish = (user: MeProfile) => {
-    setUser(user);
+  // 登录/2FA 接口只回公开档案（后端 publicUser 不含 twofa），而设置页「安全」区块要读
+  // user.twofa——直接拿登录响应的 user 落 store，登录后首次进设置页会抛错空白，刷新才恢复
+  // （ONE-332）。会话 Cookie 建立后、写入 store 前补一次 GET /api/settings/me，用完整档案落 store。
+  const finish = async () => {
+    let profile: MeProfile;
+    try {
+      profile = await settingsApi.getSettings();
+    } catch {
+      // 会话已建立但档案读取失败：不把缺 twofa 的半残档案写进 store（那样设置页照样空白），
+      // 留在登录页提示重试；重试或刷新都会重新走完整档案路径。
+      throw new Error("登录成功，但读取账户信息失败，请重试");
+    }
+    setUser(profile);
     navigate("/letters", { replace: true });
   };
 
@@ -58,7 +69,7 @@ export default function LoginPage() {
         setMethods(result.availableMethods);
         setStep("twofa");
       } else {
-        finish(result.user);
+        await finish();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败");
@@ -75,8 +86,8 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const user = await authApi.verify2fa(tempToken, "totp", code);
-      finish(user);
+      await authApi.verify2fa(tempToken, "totp", code);
+      await finish();
     } catch (err) {
       setError(err instanceof Error ? err.message : "验证失败");
     } finally {
@@ -89,15 +100,15 @@ export default function LoginPage() {
     setBusy(true);
     try {
       if (IS_MOCK) {
-        const user = await authApi.passkeyAuthenticateVerify(tempToken, { mock: true });
-        finish(user);
+        await authApi.passkeyAuthenticateVerify(tempToken, { mock: true });
+        await finish();
       } else {
         const options = (await authApi.passkeyAuthenticateOptions(
           tempToken,
         )) as PublicKeyCredentialRequestOptionsJSON;
         const assertion = await startAuthentication({ optionsJSON: options });
-        const user = await authApi.passkeyAuthenticateVerify(tempToken, assertion);
-        finish(user);
+        await authApi.passkeyAuthenticateVerify(tempToken, assertion);
+        await finish();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "通行密钥验证失败");
