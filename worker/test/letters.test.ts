@@ -505,6 +505,70 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     expect(patchC.body.is_public).toBe(true);
   });
 
+  it("cancelled 带已投递（sent）收件人：编辑/回退均 409（防重复投递）", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${created.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+    // 模拟部分投递：该收件人已 sent
+    await env.DB.prepare(
+      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+    )
+      .bind(new Date().toISOString(), created.body.id)
+      .run();
+    // 部分投递后用户 cancel → cancelled 且仍带 sent 收件人
+    await request(env, `/api/letters/${created.body.id}/cancel`, {
+      method: "POST",
+      headers: user,
+    });
+    const afterCancel = await request(env, `/api/letters/${created.body.id}`, {
+      headers: user,
+    });
+    expect(afterCancel.body.status).toBe("cancelled");
+
+    // PUT 全量重写收件人 → 409
+    const put = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PUT", payload({ title: "篡改" }), user),
+    );
+    expect(put.status).toBe(409);
+
+    // PATCH 内容编辑 → 409
+    const patchContent = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PATCH", { title: "改标题" }, user),
+    );
+    expect(patchContent.status).toBe(409);
+
+    // PATCH 收件人 → 409
+    const patchRecipients = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PATCH", { recipients: [{ name: "", email: "other@example.com" }] }, user),
+    );
+    expect(patchRecipients.status).toBe(409);
+
+    // POST /draft 回退 → 409
+    const revert = await request(env, `/api/letters/${created.body.id}/draft`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(revert.status).toBe(409);
+
+    // sent 收件人快照未被抹除
+    const recipients = await env.DB.prepare(
+      `SELECT status FROM letter_recipients WHERE letter_id = ?`,
+    )
+      .bind(created.body.id)
+      .all<{ status: string }>();
+    expect(recipients.results).toHaveLength(1);
+    expect(recipients.results[0].status).toBe("sent");
+  });
+
   it("sending 中信不可删除", async () => {
     const { env, user } = await setupWithUser();
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));

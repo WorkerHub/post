@@ -29,7 +29,7 @@ import { getContactById } from "../db/queries/contacts";
 //
 // 操作边界（不变量）：
 // - 内容/收件人编辑（PUT/PATCH 非 is_public 字段）：draft，或 scheduled 且无已投递收件人（status='sent'），
-//   或 cancelled（保存后回 draft）。
+//   或 cancelled 且无已投递收件人（保存后回 draft）。
 // - scheduled 不变量：任何使信件处于 scheduled 的写入，收件人数量必须 >0 且 send_at 必须晚于当前时间，
 //   杜绝「空收件人幽灵发送 / 过去时间提前触发 / null send_at 死锁」。
 // - 已有 sent 收件人的信严禁重写收件人（防重复投递）；只能 cancel（若仍 scheduled）或等 cron 收尾。
@@ -112,6 +112,18 @@ function isEditableStatus(letter: Letter): boolean {
     letter.status === "scheduled" ||
     letter.status === "cancelled"
   );
+}
+
+/**
+ * 防重复投递核心边界：只要信件在 letter_recipients 中存在 status='sent' 的记录，
+ * 无论当前是 scheduled 还是 cancelled（或任何可编辑状态），均禁止内容/收件人编辑与回退草稿。
+ * （部分投递成功后信件可能被 cancel 或 failed→resend→cancel，此时仍带 sent 收件人。）
+ */
+async function hasDeliveredRecipients(
+  db: D1Database,
+  letterId: string,
+): Promise<boolean> {
+  return (await countSentRecipients(db, letterId)) > 0;
 }
 
 /** scheduled 不变量：收件人非空 + send_at 晚于当前时间。返回 null 表示通过。 */
@@ -356,7 +368,7 @@ lettersRoutes.put("/:id", async (c) => {
   if (!isEditableStatus(letter)) {
     return c.json({ error: "寄出后不可再编辑" }, 409);
   }
-  if (letter.status === "scheduled" && (await countSentRecipients(c.env.DB, id)) > 0) {
+  if (await hasDeliveredRecipients(c.env.DB, id)) {
     return c.json({ error: "已开始投递的信不可再编辑" }, 409);
   }
 
@@ -421,7 +433,7 @@ lettersRoutes.patch("/:id", async (c) => {
     if (!isEditableStatus(letter)) {
       return c.json({ error: "寄出后不可再编辑" }, 409);
     }
-    if (letter.status === "scheduled" && (await countSentRecipients(c.env.DB, id)) > 0) {
+    if (await hasDeliveredRecipients(c.env.DB, id)) {
       return c.json({ error: "已开始投递的信不可再编辑" }, 409);
     }
   }
@@ -505,7 +517,7 @@ lettersRoutes.post("/:id/schedule", async (c) => {
   return respondWithLetter(c, id);
 });
 
-// scheduled/cancelled → draft（撤回草稿）：scheduled 仅限无已投递收件人；cancelled 直接放行（前端③契约）。
+// scheduled/cancelled → draft（撤回草稿）：均需无已投递收件人（防重复投递）。
 lettersRoutes.post("/:id/draft", async (c) => {
   const id = c.req.param("id");
   const letter = await fetchOwnedLetter(c, id);
@@ -517,10 +529,7 @@ lettersRoutes.post("/:id/draft", async (c) => {
   if (letter.status !== "scheduled" && letter.status !== "cancelled") {
     return c.json({ error: "仅待寄出或已取消的信可撤回草稿" }, 409);
   }
-  if (
-    letter.status === "scheduled" &&
-    (await countSentRecipients(c.env.DB, id)) > 0
-  ) {
+  if (await hasDeliveredRecipients(c.env.DB, id)) {
     return c.json({ error: "已开始投递的信不可撤回草稿" }, 409);
   }
 
