@@ -11,19 +11,19 @@ import {
   generateJti,
 } from "../core/auth";
 import {
-  createUser,
   createUserFirstIsAdmin,
   findUserByEmail,
   findUserById,
   get2FAConfig,
-  countUsers,
 } from "../db/queries/users";
 import { getAvailable2FAMethods } from "../services/twofa";
 import { rateLimit } from "../middleware/auth";
+import { isSetupAvailable } from "../lib/setup";
 
 // 移植自 eNotify routes/auth.ts：HttpOnly Cookie + JWT 双 token（access 24h / refresh 7d）、
 // KV 会话索引/黑名单、登录防时序侧信道、限流参数全部同款。
-// 差异（按 SPEC §3）：注册开放但新账号默认 pending，登录/刷新时拒绝待批准账号；
+// 差异（SPEC §3 + ONE-313 冻结契约）：注册开放但新账号默认 pending，登录/刷新时拒绝待批准账号；
+// setup 未完成（初始化未做）时注册一律 403；初始化完成后第一个注册账号即 admin+approved。
 // 不做邮箱验证与密码找回邮件（v1 全局 SMTP 在后续单接入，届时再评估补齐）。
 
 export const authRoutes = new Hono<HonoEnv>();
@@ -44,7 +44,7 @@ authRoutes.use(
   rateLimit({ max: 20, window: 300, keyPrefix: "refresh" }),
 );
 
-// ─── register：开放注册，一律 role=user + 待批准 ────────────────────────────
+// ─── register：setup 关闭后首个账号为管理员，其余 user + 待批准 ────────────────
 
 authRoutes.post("/register", async (c) => {
   const body = await c.req.json<{ email: string; password: string }>();
@@ -61,12 +61,13 @@ authRoutes.post("/register", async (c) => {
     return c.json({ error: "Password must be at least 8 characters" }, 400);
   }
 
-  // 首个账号必须走 setup（X-Setup-Secret）创建，开放注册永不产生管理员
-  const prefix = getTablePrefix(c.env);
-  if ((await countUsers(c.env.DB, prefix)) === 0) {
+  // ONE-313 冻结契约：setup 仍可初始化时禁止注册；初始化完成后第一个注册账号即管理员。
+  // 判定用 isSetupAvailable（setup_page_enabled 关闭），不再只看 users 是否为空。
+  if (await isSetupAvailable(c.env)) {
     return c.json({ error: "Setup required before registration" }, 403);
   }
 
+  const prefix = getTablePrefix(c.env);
   const existing = await findUserByEmail(c.env.DB, prefix, email);
   if (existing) {
     return c.json({ error: "Email already registered" }, 409);
@@ -76,12 +77,12 @@ authRoutes.post("/register", async (c) => {
   const passwordHash = await hashPassword(password);
 
   try {
-    await createUser(c.env.DB, prefix, {
+    // 单条语句内原子决定「setup 已关闭且 users 为空 → admin+approved，否则 user+pending」；
+    // 并发注册也只会有一个管理员（后到者落为 pending）。
+    await createUserFirstIsAdmin(c.env.DB, prefix, {
       id,
       email,
       password_hash: passwordHash,
-      role: "user",
-      approval_status: "pending",
     });
   } catch (err) {
     if (err instanceof Error && /UNIQUE/i.test(err.message)) {
@@ -90,10 +91,32 @@ authRoutes.post("/register", async (c) => {
     throw err;
   }
 
+  // 回读判定实际落库的角色（并发下首个坑位可能已被别人占走）
+  const user = await findUserById(c.env.DB, prefix, id);
+  if (!user) {
+    return c.json({ error: "Internal server error" }, 500);
+  }
+
+  // 首个账号：admin + approved，走既有 /api/auth/login 流程
+  if (user.role === "admin" && user.approval_status === "approved") {
+    return c.json(
+      {
+        success: true,
+        role: user.role,
+        approval_status: user.approval_status,
+        pending: false,
+        message: "Registration successful. You are the first user and an admin.",
+      },
+      201,
+    );
+  }
+
   // 待批准账号不签发会话，等管理员批准后再登录
   return c.json(
     {
       success: true,
+      role: user.role,
+      approval_status: user.approval_status,
       message: "Registration successful. Please wait for admin approval.",
       pending: true,
     },

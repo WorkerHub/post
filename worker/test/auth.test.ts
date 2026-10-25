@@ -12,11 +12,12 @@ import {
   makeEnv,
   registerAndApprove,
   request,
-  setupSecretHeader,
+  setupInit,
+  TEST_SETUP_SECRET,
   ipHeader,
 } from "./helpers";
 
-describe("setup（首次部署创建管理员，创建后关闭）", () => {
+describe("setup（ONE-313：只填 SETUP_SECRET 完成初始化，不建任何账号）", () => {
   it("state reports enabled on a fresh deployment", async () => {
     const env = makeEnv();
     const { status, body } = await request(env, "/api/setup/state");
@@ -24,23 +25,33 @@ describe("setup（首次部署创建管理员，创建后关闭）", () => {
     expect(body).toEqual({ enabled: true });
   });
 
-  it("rejects POST without / with wrong X-Setup-Secret", async () => {
+  it("rejects POST without setup_secret / with wrong secret / with legacy header", async () => {
     const env = makeEnv();
-    const noSecret = await request(
-      env,
-      "/api/setup",
-      jsonInit("POST", { email: "admin@example.com", password: "admin-password-123" }),
-    );
-    expect(noSecret.status).toBe(403);
 
-    const wrongSecret = await request(
+    // 请求体缺失 setup_secret
+    const noSecret = await request(env, "/api/setup", jsonInit("POST", {}));
+    expect(noSecret.status).toBe(403);
+    expect(noSecret.body).toEqual({ error: "Invalid setup secret" });
+
+    // 只带旧版 X-Setup-Secret 头、请求体没有密钥：不再被接受
+    const legacyHeader = await request(
       env,
       "/api/setup",
-      jsonInit("POST", { email: "admin@example.com", password: "admin-password-123" }, {
-        "X-Setup-Secret": "wrong",
-      }),
+      jsonInit("POST", {}, { "X-Setup-Secret": TEST_SETUP_SECRET }),
     );
+    expect(legacyHeader.status).toBe(403);
+    expect(legacyHeader.body).toEqual({ error: "Invalid setup secret" });
+
+    // 密钥不符
+    const wrongSecret = await request(env, "/api/setup", setupInit("wrong"));
     expect(wrongSecret.status).toBe(403);
+    expect(wrongSecret.body).toEqual({ error: "Invalid setup secret" });
+
+    // 失败后 setup 仍开放，且没有建出任何账号
+    expect((await request(env, "/api/setup/state")).body).toEqual({
+      enabled: true,
+    });
+    expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
   });
 
   it("GET with secret in path is deprecated (405)", async () => {
@@ -49,37 +60,20 @@ describe("setup（首次部署创建管理员，创建后关闭）", () => {
     expect(status).toBe(405);
   });
 
-  it("creates the first account as admin+approved, then closes setup", async () => {
+  it("correct secret closes setup without creating any account", async () => {
     const env = makeEnv();
-    const { status, body } = await request(
-      env,
-      "/api/setup",
-      jsonInit(
-        "POST",
-        { email: "Admin@Example.com", password: "admin-password-123" },
-        setupSecretHeader(),
-      ),
-    );
-    expect(status).toBe(201);
-    expect(body.user).toMatchObject({
-      email: "admin@example.com",
-      role: "admin",
-      approval_status: "approved",
-    });
+    const { status, body } = await request(env, "/api/setup", setupInit());
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
 
-    // state 关闭 + 再次 setup 被拒
+    // setup 关闭，但账号数仍为 0（初始化不建号）
     expect((await request(env, "/api/setup/state")).body).toEqual({
       enabled: false,
     });
-    const again = await request(
-      env,
-      "/api/setup",
-      jsonInit(
-        "POST",
-        { email: "other@example.com", password: "admin-password-123" },
-        setupSecretHeader(),
-      ),
-    );
+    expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
+
+    // 再次提交被拒
+    const again = await request(env, "/api/setup", setupInit());
     expect(again.status).toBe(403);
     expect(again.body).toEqual({ error: "Setup is closed" });
   });
@@ -93,6 +87,70 @@ describe("setup（首次部署创建管理员，创建后关闭）", () => {
     );
     expect(status).toBe(403);
     expect(body.error).toContain("Setup required");
+    expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
+  });
+
+  it("the first register after setup becomes admin+approved and can login", async () => {
+    const env = makeEnv();
+    await request(env, "/api/setup", setupInit());
+
+    const reg = await request(
+      env,
+      "/api/auth/register",
+      jsonInit("POST", { email: "Owner@Example.com", password: "admin-password-123" }),
+    );
+    expect(reg.status).toBe(201);
+    expect(reg.body).toMatchObject({
+      success: true,
+      role: "admin",
+      approval_status: "approved",
+      pending: false,
+    });
+
+    const users = await listUsers(env.DB, getTablePrefix(env));
+    expect(users).toHaveLength(1);
+    expect(users[0].role).toBe("admin");
+    expect(users[0].approval_status).toBe("approved");
+
+    // 既有管理员登录流程：直接可登录，无需等批准
+    const cookies = await loginAndGetCookies(env, "owner@example.com", "admin-password-123");
+    expect(cookies.access_token).toBeDefined();
+    const me = await request(env, "/api/me", {
+      headers: cookieHeader(["access_token", cookies.access_token]),
+    });
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({ email: "owner@example.com", role: "admin" });
+
+    // setup 已关闭，state 不再开放
+    expect((await request(env, "/api/setup/state")).body).toEqual({
+      enabled: false,
+    });
+  });
+
+  it("later registrations stay user+pending until an admin approves", async () => {
+    const env = makeEnv();
+    await doSetup(env);
+
+    const second = await request(
+      env,
+      "/api/auth/register",
+      jsonInit("POST", { email: "friend@example.com", password: "user-password-123" }),
+    );
+    expect(second.status).toBe(201);
+    expect(second.body).toMatchObject({ success: true, pending: true });
+
+    const users = await listUsers(env.DB, getTablePrefix(env));
+    const friend = users.find((u) => u.email === "friend@example.com");
+    expect(friend?.role).toBe("user");
+    expect(friend?.approval_status).toBe("pending");
+
+    const pendingLogin = await request(
+      env,
+      "/api/auth/login",
+      jsonInit("POST", { email: "friend@example.com", password: "user-password-123" }),
+    );
+    expect(pendingLogin.status).toBe(403);
+    expect(pendingLogin.body).toMatchObject({ pending: true });
   });
 });
 
@@ -333,15 +391,11 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
     async (_label, bad) => {
       const env = makeEnv({ SETUP_SECRET: bad });
 
-      // Tony 的复现路径：X-Setup-Secret 回传占位符本身
+      // Tony 的复现路径：请求体回传占位符本身
       const setup = await request(
         env,
         "/api/setup",
-        jsonInit(
-          "POST",
-          { email: "attacker@example.com", password: "admin-password-123" },
-          { "X-Setup-Secret": "SETUP_SECRET_PLACEHOLDER" },
-        ),
+        jsonInit("POST", { setup_secret: "SETUP_SECRET_PLACEHOLDER" }),
       );
       expect(setup.status).toBe(500);
       expect(setup.body).toEqual({ error: "Server misconfigured" });
@@ -369,11 +423,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
     const setup = await request(
       env,
       "/api/setup",
-      jsonInit(
-        "POST",
-        { email: "attacker@example.com", password: "admin-password-123" },
-        setupSecretHeader(),
-      ),
+      jsonInit("POST", { setup_secret: "SETUP_SECRET_PLACEHOLDER" }),
     );
     expect(setup.status).toBe(500);
     expect((await request(env, "/api/health")).status).toBe(500);
@@ -390,11 +440,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
     const setup = await request(
       env,
       "/api/setup",
-      jsonInit(
-        "POST",
-        { email: "attacker@example.com", password: "admin-password-123" },
-        setupSecretHeader(),
-      ),
+      jsonInit("POST", { setup_secret: TEST_SETUP_SECRET }),
     );
     expect(setup.status).toBe(500);
     expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
@@ -417,10 +463,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
             "content-type": "application/json",
             "X-Setup-Secret": "SETUP_SECRET_PLACEHOLDER",
           },
-          body: JSON.stringify({
-            email: "attacker@example.com",
-            password: "admin-password-123",
-          }),
+          body: JSON.stringify({ setup_secret: "SETUP_SECRET_PLACEHOLDER" }),
         },
         env,
       );
@@ -431,44 +474,28 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
   });
 });
 
-describe("并发 setup 竞态（ONE-192 Should-fix）", () => {
-  it("只有一个请求能建出管理员，后到请求 403 且不留垃圾行", async () => {
+describe("并发注册竞态（ONE-313）", () => {
+  it("并发注册只有一个能拿到管理员，另一个落为 user+pending", async () => {
     const env = makeEnv();
+    await request(env, "/api/setup", setupInit());
+
     const [a, b] = await Promise.all([
       request(
         env,
-        "/api/setup",
-        jsonInit(
-          "POST",
-          { email: "first@example.com", password: "admin-password-123" },
-          setupSecretHeader(),
-        ),
+        "/api/auth/register",
+        jsonInit("POST", { email: "first@example.com", password: "admin-password-123" }),
       ),
       request(
         env,
-        "/api/setup",
-        jsonInit(
-          "POST",
-          { email: "second@example.com", password: "admin-password-123" },
-          setupSecretHeader(),
-        ),
+        "/api/auth/register",
+        jsonInit("POST", { email: "second@example.com", password: "user-password-123" }),
       ),
     ]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect([a.body.pending, b.body.pending].sort()).toEqual([false, true]);
 
-    // 一个 201（胜者建出 admin），一个 403（后到者不误报成功）
-    expect([a.status, b.status].sort()).toEqual([201, 403]);
-    const loser = a.status === 403 ? a : b;
-    expect(loser.body).toEqual({ error: "Setup is closed" });
-
-    // 库里只有胜者一个 admin；竞态插入的 user 行已被清理
     const users = await listUsers(env.DB, getTablePrefix(env));
-    expect(users).toHaveLength(1);
-    expect(users[0].role).toBe("admin");
-    expect(users[0].approval_status).toBe("approved");
-
-    // setup 已关闭
-    expect((await request(env, "/api/setup/state")).body).toEqual({
-      enabled: false,
-    });
+    expect(users).toHaveLength(2);
+    expect(users.filter((u) => u.role === "admin")).toHaveLength(1);
   });
 });
