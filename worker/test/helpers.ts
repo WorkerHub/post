@@ -131,6 +131,19 @@ export class SqliteD1 {
       ...wrap([]),
     };
   }
+
+  // D1 batch：生产环境单事务原子提交；测试替身按顺序执行（行为等价）。
+  async batch(
+    statements: {
+      run: () => Promise<{ success: boolean; meta: { changes: number } }>;
+    }[],
+  ): Promise<{ success: boolean; meta: { changes: number } }[]> {
+    const out: { success: boolean; meta: { changes: number } }[] = [];
+    for (const s of statements) {
+      out.push(await s.run());
+    }
+    return out;
+  }
 }
 
 // ─── 流程辅助：完成 setup + 建号 + 登录 ──────────────────────────────────────
