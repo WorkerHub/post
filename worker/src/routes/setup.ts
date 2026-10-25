@@ -1,10 +1,15 @@
 import { Hono } from "hono";
-import type { Env, HonoEnv } from "../types";
-import { getTablePrefix } from "../types";
+import type { HonoEnv } from "../types";
 import { safeEqual } from "../core/auth";
 import { rateLimit } from "../middleware/auth";
 import { isSetupAvailable, isSetupPageEnabled, closeSetup } from "../lib/setup";
-import { SCHEMA_SQL } from "../db/schema";
+import {
+  firstMigrationError,
+  runMigrations,
+  TablePrefixConflictError,
+  toSchemaReport,
+  type RunMigrationsResult,
+} from "../lib/migrations-runner";
 
 // setup 流程（ONE-313 冻结契约）：可视化 setup 页只填 SETUP_SECRET 完成初始化，
 // 不再建任何账号；初始化完成后，第一个通过页面注册的用户成为管理员（见 routes/auth.ts）。
@@ -64,40 +69,38 @@ setupRoutes.post(
       return c.json({ error: "Setup is closed" }, 403);
     }
 
-    // 全新部署兜底建表（幂等；不再有独立静态迁移，见 ONE-269 冻结契约第 7 条）。
+    // 建表路径 = 迁移账本（ONE-347）：与管理员 db-upgrade 共用同一个 runner。
     // 必须先建表再 closeSetup（后者写 system_settings）。
-    const prefix = await ensureSchema(c.env);
+    let result: RunMigrationsResult;
+    try {
+      result = await runMigrations(c.env);
+    } catch (err) {
+      if (err instanceof TablePrefixConflictError) {
+        console.error(`[setup] table prefix conflict: ${err.message}`);
+        return c.json({ error: err.message }, 409);
+      }
+      throw err;
+    }
+
+    const report = toSchemaReport(result);
+    const failed = firstMigrationError(result);
+    if (failed) {
+      // 迁移失败不关闭 setup：账本没记失败项，修好后可重跑。
+      console.error(
+        `[setup] migration failed: ${failed.name}: ${failed.error}`,
+      );
+      return c.json(
+        { error: `Migration failed: ${failed.name}`, ...report },
+        500,
+      );
+    }
 
     await closeSetup(c.env);
 
-    console.log(`[setup] initialized, schema ensured with table prefix "${prefix}"`);
-    return c.json({ success: true });
+    console.log(
+      `[setup] initialized, migrations ok with table prefix "${report.table_prefix}"`,
+    );
+    return c.json({ success: true, ...report });
   },
 );
 
-/** 建表执行摘要（ONE-319：POST /api/admin/db-upgrade 回给管理后台展示）。 */
-export interface SchemaReport {
-  /** 实际生效的表前缀 */
-  table_prefix: string;
-  /** 本次执行的建表/索引语句条数（全部 IF NOT EXISTS，幂等） */
-  statements: number;
-}
-
-/** 按生效前缀替换 {prefix} 后建表（幂等），并返回执行摘要。 */
-export async function runSchema(env: Env): Promise<SchemaReport> {
-  const prefix = getTablePrefix(env);
-  const resolved = SCHEMA_SQL.replace(/\{prefix\}/g, prefix);
-  const statements = resolved
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  for (const stmt of statements) {
-    await env.DB.prepare(stmt).run();
-  }
-  return { table_prefix: prefix, statements: statements.length };
-}
-
-/** 按生效前缀替换 {prefix} 后建表（幂等），并返回实际生效前缀。 */
-export async function ensureSchema(env: Env): Promise<string> {
-  return (await runSchema(env)).table_prefix;
-}

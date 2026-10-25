@@ -1,24 +1,53 @@
 import { DatabaseSync } from "node:sqlite";
 import { app } from "../src/index";
-import { SCHEMA_SQL } from "../src/db/schema";
-import { getTablePrefix, type Env } from "../src/types";
+import {
+  createMigrationsTableSql,
+  getMigrations,
+} from "../src/db/migrations";
+import {
+  getTablePrefix,
+  migrationsTable,
+  type Env,
+} from "../src/types";
 
 export const TEST_JWT_SECRET = "test-jwt-secret-0123456789abcdef";
 export const TEST_SETUP_SECRET = "test-setup-secret";
 
-export type TestEnv = Record<string, unknown>;
-
-/** 按 TABLE_PREFIX 解析生效前缀并替换 {prefix}（与运行时 ensureSchema 一致）。 */
+/**
+ * 按 TABLE_PREFIX 解析生效前缀，把迁移列表拼成一段可直接 exec 的 DDL。
+ * （schema_v1 起的历史塌缩后只有一条迁移，拼起来即完整 schema。）
+ */
 export function resolveSchema(env: Pick<Env, "TABLE_PREFIX">): string {
-  return SCHEMA_SQL.replace(/\{prefix\}/g, getTablePrefix(env));
+  return getMigrations(getTablePrefix(env))
+    .map((m) => m.sql)
+    .join("\n");
+}
+
+/**
+ * 建一个「已完成初始化」的内存库：全部迁移 + 账本都已落好，等同线上跑完 setup 之后。
+ * 绝大多数业务测试只需要一个可用的库，不必重放 setup。
+ */
+export function makeMigratedDb(
+  prefix: string,
+  enableForeignKeys = true,
+): SqliteD1 {
+  const db = new SqliteD1("", enableForeignKeys);
+  db.db.exec(createMigrationsTableSql(prefix));
+  for (const migration of getMigrations(prefix)) {
+    db.db.exec(migration.sql);
+    db.db
+      .prepare(`INSERT INTO ${migrationsTable(prefix)} (name) VALUES (?)`)
+      .run(migration.name);
+  }
+  return db;
 }
 
 export function makeEnv(overrides: TestEnv = {}): Env {
-  const schema = resolveSchema({
+  const prefix = getTablePrefix({
     TABLE_PREFIX: overrides.TABLE_PREFIX,
   } as Pick<Env, "TABLE_PREFIX">);
   return {
-    DB: new SqliteD1(schema),
+    DB: makeMigratedDb(prefix),
     KV: new MockKV(),
     JWT_SECRET: TEST_JWT_SECRET,
     SETUP_SECRET: TEST_SETUP_SECRET,
@@ -106,13 +135,21 @@ export class MockKV {
 
 // ─── D1 stand-in：真 SQLite（node:sqlite），保留列默认值/CHECK/FK 行为 ────────
 
+export type TestEnv = Record<string, unknown>;
+
 export class SqliteD1 {
   readonly db: DatabaseSync;
 
-  constructor(schema: string = SCHEMA_SQL, enableForeignKeys = true) {
+  constructor(schema: string = "", enableForeignKeys = true) {
     this.db = new DatabaseSync(":memory:");
     if (enableForeignKeys) this.db.exec("PRAGMA foreign_keys = ON");
-    this.db.exec(schema);
+    if (schema.trim() !== "") this.db.exec(schema);
+  }
+
+  // D1 exec：多语句执行（runner 用它跑一条迁移的整段 DDL）。
+  async exec(sql: string): Promise<{ count: number; duration: number }> {
+    this.db.exec(sql);
+    return { count: 0, duration: 0 };
   }
 
   prepare(sql: string): {

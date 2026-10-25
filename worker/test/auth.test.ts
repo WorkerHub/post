@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { setupRoutes } from "../src/routes/setup";
-import { getTablePrefix, type HonoEnv } from "../src/types";
+import { getTablePrefix, migrationsTable, type HonoEnv } from "../src/types";
 import { countUsers, listUsers } from "../src/db/queries/users";
 import {
   cookieHeader,
@@ -10,9 +10,11 @@ import {
   jsonInit,
   loginAndGetCookies,
   makeEnv,
+  makeMigratedDb,
   registerAndApprove,
   request,
   setupInit,
+  SqliteD1,
   TEST_SETUP_SECRET,
   ipHeader,
 } from "./helpers";
@@ -64,7 +66,9 @@ describe("setup（ONE-313：只填 SETUP_SECRET 完成初始化，不建任何�
     const env = makeEnv();
     const { status, body } = await request(env, "/api/setup", setupInit());
     expect(status).toBe(200);
-    expect(body).toEqual({ success: true });
+    expect(body).toMatchObject({ success: true, table_prefix: "post_" });
+    // 测试替身库已初始化过（账本已记 schema_v1）→ 本次全部 skipped
+    expect(body.migrations).toEqual([{ name: "schema_v1", status: "skipped" }]);
 
     // setup 关闭，但账号数仍为 0（初始化不建号）
     expect((await request(env, "/api/setup/state")).body).toEqual({
@@ -76,6 +80,69 @@ describe("setup（ONE-313：只填 SETUP_SECRET 完成初始化，不建任何�
     const again = await request(env, "/api/setup", setupInit());
     expect(again.status).toBe(403);
     expect(again.body).toEqual({ error: "Setup is closed" });
+  });
+
+  it("全新部署（空库）：POST /api/setup 跑迁移账本建出 schema（ONE-347）", async () => {
+    // 空库：任何表都没有，模拟首次部署
+    const env = makeEnv({ DB: new SqliteD1("") as unknown as D1Database });
+
+    const { status, body } = await request(env, "/api/setup", setupInit());
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.table_prefix).toBe("post_");
+    expect(body.applied).toBe(1);
+    expect(body.migrations).toEqual([{ name: "schema_v1", status: "applied" }]);
+
+    // 业务表与账本表都建出来了
+    const tables = (
+      await env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+      ).all<{ name: string }>()
+    ).results.map((r) => r.name);
+    expect(tables).toEqual(
+      expect.arrayContaining([
+        "post_users",
+        "post_letters",
+        "post_system_settings",
+        migrationsTable("post_"),
+      ]),
+    );
+
+    // 账本恰含 schema_v1
+    const ledger = (
+      await env.DB.prepare(`SELECT name FROM ${migrationsTable("post_")}`).all<{
+        name: string;
+      }>()
+    ).results.map((r) => r.name);
+    expect(ledger).toEqual(["schema_v1"]);
+
+    // 初始化完成：setup 关闭，且仍未建任何账号
+    expect((await request(env, "/api/setup/state")).body).toEqual({
+      enabled: false,
+    });
+    expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
+  });
+
+  it("前缀冲突：库已按其他前缀初始化 → 409，不建新前缀的表（ONE-347）", async () => {
+    // 库在无前缀下初始化过，但当前环境解析成默认 post_
+    const initialized = makeMigratedDb("");
+    const env = makeEnv({ DB: initialized as unknown as D1Database });
+
+    const { status, body } = await request(env, "/api/setup", setupInit());
+    expect(status).toBe(409);
+    expect(body.error).toContain("无前缀 schema");
+
+    // 没有按新前缀另建一套表
+    const tables = (
+      await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'")
+        .all<{ name: string }>()
+    ).results.map((r) => r.name);
+    expect(tables).not.toContain("post_users");
+    expect(tables).not.toContain("_post_schema_migrations");
+    // setup 未被关闭
+    expect((await request(env, "/api/setup/state")).body).toEqual({
+      enabled: true,
+    });
   });
 
   it("register cannot bootstrap the first account before setup runs", async () => {
