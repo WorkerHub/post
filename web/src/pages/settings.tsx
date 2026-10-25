@@ -2,12 +2,11 @@ import { useCallback } from "react";
 
 import { settingsApi } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
-import { MaintenanceSection } from "@/components/settings/maintenance-section";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { SecuritySection } from "@/components/settings/security-section";
-import { SmtpSection } from "@/components/settings/smtp-section";
-import { UsersSection } from "@/components/settings/users-section";
 
+// 设置页（F3 / ONE-331）：只保留个人资料与安全两块，
+// SMTP 配置 / 用户管理 / 系统维护已迁到 /admin（系统管理页）。
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -27,8 +26,6 @@ export default function SettingsPage() {
     );
   }
 
-  const isAdmin = user.role === "admin";
-
   return (
     <div>
       <h1 className="font-serif text-2xl font-semibold">设置</h1>
@@ -37,13 +34,6 @@ export default function SettingsPage() {
       <div className="mt-6 space-y-6">
         <ProfileSection user={user} onSaved={() => void refresh()} />
         <SecuritySection user={user} onSaved={() => void refresh()} />
-        {isAdmin && (
-          <>
-            <SmtpSection />
-            <UsersSection currentUserId={user.id} />
-            <MaintenanceSection />
-          </>
-        )}
       </div>
     </div>
   );
