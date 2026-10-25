@@ -78,7 +78,13 @@ describe("登录页 · TOTP 二次验证", () => {
     // 进入二次验证步骤
     expect(await screen.findByText(/双重验证/)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("六位验证码"), { target: { value: "123456" } });
+    const codeInput = screen.getByLabelText("六位验证码");
+    // ONE-335：显式 text + one-time-code，避免 Bitwarden 等密码管理器误填密码
+    expect(codeInput).toHaveAttribute("type", "text");
+    expect(codeInput).toHaveAttribute("autocomplete", "one-time-code");
+    expect(codeInput).toHaveAttribute("inputmode", "numeric");
+
+    fireEvent.change(codeInput, { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: /验证/ }));
 
     expect(await screen.findByText("工作台占位")).toBeInTheDocument();
