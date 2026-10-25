@@ -3,7 +3,7 @@ import type { Env, HonoEnv } from "../types";
 import { getTablePrefix } from "../types";
 import { safeEqual } from "../core/auth";
 import { rateLimit } from "../middleware/auth";
-import { isSetupAvailable, closeSetup } from "../lib/setup";
+import { isSetupAvailable, isSetupPageEnabled, closeSetup } from "../lib/setup";
 import { SCHEMA_SQL } from "../db/schema";
 
 // setup 流程（ONE-313 冻结契约）：可视化 setup 页只填 SETUP_SECRET 完成初始化，
@@ -14,6 +14,10 @@ export const setupRoutes = new Hono<HonoEnv>();
 
 // Public state endpoint: reports whether the setup page should be shown.
 setupRoutes.get("/state", async (c) => {
+  // ONE-319 冻结契约：管理后台把 setup 页开关关掉后，本接口整体 404，不返回任何 setup 状态。
+  if (!(await isSetupPageEnabled(c.env))) {
+    return c.json({ error: "Not found" }, 404);
+  }
   const available = await isSetupAvailable(c.env);
   return c.json({ enabled: available });
 });
@@ -71,8 +75,16 @@ setupRoutes.post(
   },
 );
 
-/** 按生效前缀替换 {prefix} 后建表（幂等），并返回实际生效前缀。 */
-export async function ensureSchema(env: Env): Promise<string> {
+/** 建表执行摘要（ONE-319：POST /api/admin/db-upgrade 回给管理后台展示）。 */
+export interface SchemaReport {
+  /** 实际生效的表前缀 */
+  table_prefix: string;
+  /** 本次执行的建表/索引语句条数（全部 IF NOT EXISTS，幂等） */
+  statements: number;
+}
+
+/** 按生效前缀替换 {prefix} 后建表（幂等），并返回执行摘要。 */
+export async function runSchema(env: Env): Promise<SchemaReport> {
   const prefix = getTablePrefix(env);
   const resolved = SCHEMA_SQL.replace(/\{prefix\}/g, prefix);
   const statements = resolved
@@ -82,5 +94,10 @@ export async function ensureSchema(env: Env): Promise<string> {
   for (const stmt of statements) {
     await env.DB.prepare(stmt).run();
   }
-  return prefix;
+  return { table_prefix: prefix, statements: statements.length };
+}
+
+/** 按生效前缀替换 {prefix} 后建表（幂等），并返回实际生效前缀。 */
+export async function ensureSchema(env: Env): Promise<string> {
+  return (await runSchema(env)).table_prefix;
 }
