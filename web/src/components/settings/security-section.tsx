@@ -277,6 +277,8 @@ export function SecuritySection({
                 </label>
                 <Input
                   id="totp-code"
+                  type="text"
+                  autoComplete="one-time-code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   placeholder="000000"

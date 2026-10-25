@@ -59,6 +59,24 @@ afterEach(() => {
   useAuthStore.setState({ isAuthenticated: false, user: null });
 });
 
+// 安全区 TOTP 开启对话框（ONE-335）：验证码输入框须为 text + one-time-code，
+// 否则密码管理器会把 6 位验证码当作密码填进来。
+describe("设置页 · 安全区 TOTP 验证码输入框", () => {
+  it("开启 TOTP 对话框的验证码输入框为 text / one-time-code / numeric", async () => {
+    state.sessionEmail = "admin@example.com";
+    renderSettings();
+    await screen.findByText("TOTP 验证码");
+
+    fireEvent.click(screen.getByRole("button", { name: "开启" }));
+
+    const codeInput = await screen.findByLabelText("六位验证码");
+    expect(codeInput).toHaveAttribute("type", "text");
+    expect(codeInput).toHaveAttribute("autocomplete", "one-time-code");
+    expect(codeInput).toHaveAttribute("inputmode", "numeric");
+    expect(codeInput).toHaveAttribute("maxlength", "6");
+  });
+});
+
 describe("设置页 · 管理员 SMTP", () => {
   it("密码脱敏：已配置时不回显明文，提示留空不改", async () => {
     state.smtp.password = "secret123"; // 模拟已配置
