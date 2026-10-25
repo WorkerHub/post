@@ -30,7 +30,7 @@ cp worker/.dev.vars.example worker/.dev.vars
 ```
 
 - `JWT_SECRET`：会话签名密钥
-- `SETUP_SECRET`：首次部署创建管理员账号所需的密钥（`X-Setup-Secret` 请求头）
+- `SETUP_SECRET`：初始化 setup 页所需的密钥（`POST /api/setup` 请求体 `{ setup_secret }`）
 - `TABLE_PREFIX`（可选，非 secret）：表名前缀，见下“表前缀”小节
 
 两个密钥均至少 16 字符；未配置/过短/占位符时 fail-safe 拒绝全部 `/api/*`（500 `Server misconfigured`）。密钥不进 `wrangler.toml [vars]`：本地走 `.dev.vars`，线上走 `wrangler secret put`。
@@ -45,13 +45,14 @@ post 使用组织共享 D1，表名一律带前缀（ONE-269）。三态解析�
 
 本地覆盖：在 `worker/.dev.vars` 加 `TABLE_PREFIX=my_`；线上：GitHub Variable `TABLE_PREFIX` 经 Deploy workflow 注入 `[vars]`。
 
-**建表统一在运行时**：`POST /api/setup` 首次建管理员时，由 `ensureSchema` 按生效前缀替换 `{prefix}` 后内联建表（幂等），并在响应/日志输出实际生效前缀。已无独立静态迁移文件。
+**建表统一在运行时**：`POST /api/setup` 完成初始化时，由 `ensureSchema` 按生效前缀替换 `{prefix}` 后内联建表（幂等）。已无独立静态迁移文件。
 
 **初始化后改前缀不支持**：表名一旦落库即固定，改 `TABLE_PREFIX` 会指向全新一套空表（不会自动迁移切换）。上线前定好前缀。
 
 ### 账号体系（stage 2）
 
-- 首次部署：`GET /api/setup/state` → `{enabled:true}`；`POST /api/setup`（`X-Setup-Secret` 头 + email/password）创建第一个账号，即管理员；创建后 setup 关闭，开放注册永不产生管理员。
+- 首次部署（ONE-313）：`GET /api/setup/state` → `{enabled:true}`；`POST /api/setup` 只提交 `{ setup_secret }`（请求体，用 `safeEqual` 与 Worker secret 比对；不符 403 `Invalid setup secret`，密钥未配置/占位符 500 `Server misconfigured`）即完成初始化，**不建任何账号**，返回 `{success:true}` 且 setup 关闭。
+- 首个账号：初始化完成后，第一个走页面 `POST /api/auth/register` 的账号即 `role=admin, approval_status=approved`，可直接登录；此后注册一律 `role=user, approval_status=pending`（setup 未完成时注册返回 403 `Setup required before registration`）。
 - 注册：`POST /api/auth/register` 开放，但新账号默认 `approval_status=pending`，登录被拒；管理员 `PUT /api/admin/users/:id/approve` 批准后才能登录。
 - 登录：密码 + 可选 TOTP/Passkey 二步验证；会话为 HttpOnly Cookie（access 24h / refresh 7d，SameSite=Strict）。
 - 用户自服务：`/api/me`（昵称/时区/语言、改密码、会话管理）；管理员：`/api/admin/users`（批准/禁用/角色）。

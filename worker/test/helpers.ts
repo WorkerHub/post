@@ -71,8 +71,11 @@ export function cookieHeader(...parts: [string, string | undefined][]): Record<s
   return { cookie: valid.map(([k, v]) => `${k}=${v}`).join("; ") };
 }
 
-export function setupSecretHeader(): Record<string, string> {
-  return { "X-Setup-Secret": TEST_SETUP_SECRET };
+/** POST /api/setup 的请求体（ONE-313 冻结契约：只填 SETUP_SECRET，不建账号） */
+export function setupInit(
+  secret: string | null = TEST_SETUP_SECRET,
+): RequestInit {
+  return jsonInit("POST", secret === null ? {} : { setup_secret: secret });
 }
 
 export function ipHeader(ip: string): Record<string, string> {
@@ -156,16 +159,17 @@ export class SqliteD1 {
 
 // ─── 流程辅助：完成 setup + 建号 + 登录 ──────────────────────────────────────
 
+/** 完成初始化（只提交 SETUP_SECRET），随后用给定邮箱注册——即首个账号＝管理员。 */
 export async function doSetup(
   env: Env,
   email = "admin@example.com",
   password = "admin-password-123",
 ): Promise<void> {
-  await request(env, "/api/setup", {
-    method: "POST",
-    headers: { "content-type": "application/json", ...setupSecretHeader() },
-    body: JSON.stringify({ email, password }),
-  });
+  await request(env, "/api/setup", setupInit());
+  const reg = await request(env, "/api/auth/register", jsonInit("POST", { email, password }));
+  if (reg.status !== 201) {
+    throw new Error(`first register failed: ${reg.status} ${JSON.stringify(reg.body)}`);
+  }
 }
 
 export async function registerAndApprove(

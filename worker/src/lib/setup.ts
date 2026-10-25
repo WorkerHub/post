@@ -2,10 +2,11 @@ import type { Env } from "../types";
 import { getTablePrefix } from "../types";
 import { countUsers, getSetting, setSetting } from "../db/queries/users";
 
-// setup 口径（SPEC §3，对齐 nav）：setup 只在首个账号创建前可用。
-// 首个账号由 POST /api/setup（X-Setup-Secret）创建，即管理员；创建后落
-// setup_page_enabled=0 硬关。防绕过：即使开关被改回 1，users 非空时仍判定已关闭。
-// 表尚未建（全新部署）时视为可用，由 setup 接口内联建表。
+// setup 口径（SPEC §3 + ONE-313 冻结契约）：可视化 setup 页只填 SETUP_SECRET 完成初始化，
+// 不创建任何账号；初始化后落 setup_page_enabled=0 硬关。此后第一个通过页面注册的用户
+// 成为管理员（role=admin, approval_status=approved），其余注册一律 user+pending。
+// 防绕过：即使开关被改回 1，users 非空时仍判定已关闭。
+// 表尚未建（全新部署）时视为可用，由 POST /api/setup 内联建表。
 
 export const SETUP_FLAG_KEY = "setup_page_enabled";
 
