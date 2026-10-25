@@ -9,6 +9,7 @@ import LoginPage from "@/pages/login";
 import PublicWallPage from "@/pages/public-wall";
 import RegisterPage from "@/pages/register";
 import SettingsPage from "@/pages/settings";
+import SetupPage from "@/pages/setup";
 
 // 写信页按需加载：TipTap/ProseMirror 体积较大，仅访问 /compose 时才拉取，
 // 避免公开信墙等首屏页面背负编辑器依赖。
@@ -24,6 +25,7 @@ export default function App() {
       <Suspense fallback={<div className="py-16 text-center text-sm text-ink-500">加载中…</div>}>
         <Routes>
           <Route path="/" element={<PublicWallPage />} />
+          <Route path="/setup" element={<SetupPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route element={<RequireAuth />}>

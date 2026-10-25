@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { Mail, Feather, Send } from "lucide-react";
+import { Mail, Feather, Send, KeyRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import type { PublicLetter } from "@/api/types";
 import { SAMPLE_LETTERS } from "@/data/sample-letters";
 import { formatDate } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
+import { useSetupStore } from "@/store/setup";
 
 const SITE_INTRO = "写一封信，寄往未来的某一天。";
 
@@ -69,6 +70,7 @@ function LetterCard({
 
 export default function PublicWallPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const setupEnabled = useSetupStore((s) => s.enabled);
   const [data, setData] = useState<{
     total_sent: number;
     letters: PublicLetter[];
@@ -122,6 +124,19 @@ export default function PublicWallPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-12">
+        {/* 未初始化（setup enabled）时，首页给出唯一入口：只填密钥的初始化页 */}
+        {setupEnabled === true && (
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-seal-500/30 bg-seal-500/10 px-4 py-3 text-sm text-ink-700">
+            <span className="inline-flex items-center gap-2">
+              <KeyRound className="size-4 shrink-0 text-seal-500" />
+              本站尚未完成初始化：填入部署时配置的初始化密钥即可启用。
+            </span>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/setup">完成初始化</Link>
+            </Button>
+          </div>
+        )}
+
         <section className="text-center">
           <h1 className="font-serif text-4xl font-semibold tracking-wide">
             时光邮局

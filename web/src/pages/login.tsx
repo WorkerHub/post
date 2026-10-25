@@ -9,6 +9,7 @@ import type { MeProfile } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/store/auth";
+import { useSetupStore } from "@/store/setup";
 
 type Step = "credentials" | "twofa";
 
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const setUser = useAuthStore((s) => s.setUser);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const setupEnabled = useSetupStore((s) => s.enabled);
 
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
@@ -29,6 +31,11 @@ export default function LoginPage() {
   // 已登录访问登录页 → 直接去工作台（避免卡死在 /login）
   if (isAuthenticated) {
     return <Navigate to="/letters" replace />;
+  }
+
+  // 初始化未完成时还没有任何账号，登录无意义 → 引导到初始化页
+  if (setupEnabled === true) {
+    return <Navigate to="/setup" replace />;
   }
 
 

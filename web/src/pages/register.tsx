@@ -1,25 +1,35 @@
 import { useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { ArrowLeft, Mail } from "lucide-react";
+import { ArrowLeft, Mail, ShieldCheck } from "lucide-react";
 
 import { authApi } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/store/auth";
+import { useSetupStore } from "@/store/setup";
 
+// 注册页（ONE-314）：setup 未初始化时注册必被后端 403，这里直接引导到 /setup；
+// setup 关闭后首个注册账号是管理员，其余账号待管理员批准。
 export default function RegisterPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const setupEnabled = useSetupStore((s) => s.enabled);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  /** null = 未提交；"admin" = 首账号成为管理员；"pending" = 等管理员批准。 */
+  const [done, setDone] = useState<null | "admin" | "pending">(null);
 
   // 已登录访问注册页 → 直接去工作台
   if (isAuthenticated) {
     return <Navigate to="/letters" replace />;
+  }
+
+  // 未初始化：注册入口一律让位给初始化页
+  if (setupEnabled === true) {
+    return <Navigate to="/setup" replace />;
   }
 
   const submit = async () => {
@@ -38,8 +48,8 @@ export default function RegisterPage() {
     }
     setBusy(true);
     try {
-      await authApi.register(email.trim(), password);
-      setDone(true);
+      const result = await authApi.register(email.trim(), password);
+      setDone(result.admin ? "admin" : "pending");
     } catch (err) {
       setError(err instanceof Error ? err.message : "注册失败");
     } finally {
@@ -55,7 +65,22 @@ export default function RegisterPage() {
           <h1 className="font-serif text-xl font-semibold">注册时光邮局</h1>
         </div>
 
-        {done ? (
+        {done === "admin" && (
+          <div className="mt-6 space-y-4">
+            <p className="flex items-start gap-2 rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-ink-700">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-seal-500" />
+              <span>
+                注册成功！你已成为本站管理员。登录后可在设置页完成 SMTP
+                配置并批准其他账号。
+              </span>
+            </p>
+            <Button asChild className="w-full">
+              <Link to="/login">去登录</Link>
+            </Button>
+          </div>
+        )}
+
+        {done === "pending" && (
           <div className="mt-6 space-y-4">
             <p className="rounded-md border border-paper-300 bg-paper-100 px-3 py-2 text-sm text-ink-700">
               注册成功！你的账号正在等待管理员批准，批准后即可登录使用。
@@ -64,7 +89,9 @@ export default function RegisterPage() {
               <Link to="/login">去登录</Link>
             </Button>
           </div>
-        ) : (
+        )}
+
+        {done === null && (
           <div className="mt-6 space-y-4">
             <div>
               <label htmlFor="reg-email" className="mb-1.5 block text-sm font-medium text-ink-700">
@@ -126,7 +153,7 @@ export default function RegisterPage() {
               </Link>
             </p>
             <p className="text-center text-xs text-ink-500">
-              注册后需管理员批准才能登录使用。
+              第一个注册的账号将成为管理员；之后的账号需管理员批准后才能登录。
             </p>
           </div>
         )}

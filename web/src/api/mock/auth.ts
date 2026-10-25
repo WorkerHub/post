@@ -1,5 +1,6 @@
 // 联调 mock：鉴权（HttpOnly Cookie 会话形态的内存等价物）+ 登录态 2FA。
 import type { AuthApi } from "../auth";
+import { SetupError } from "../setup";
 import { nextId, state, toMeProfile } from "./store";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -29,14 +30,20 @@ export const mockAuthApi: AuthApi = {
     const normalized = email.trim().toLowerCase();
     if (!EMAIL_RE.test(normalized)) throw new Error("Invalid email format");
     if (password.length < 8) throw new Error("Password must be at least 8 characters");
+    // 契约（ONE-313）：setup 未初始化时注册被拒 403
+    if (state.setupEnabled) {
+      throw new SetupError("Setup required before registration", 403);
+    }
     if (state.accounts.some((a) => a.email === normalized)) {
       throw new Error("Email already registered");
     }
+    // 首个注册账号 = 管理员 + 直接可用；后续 = 普通账号 + 待批准
+    const isFirst = state.accounts.length === 0;
     state.accounts.push({
       id: nextId("u"),
       email: normalized,
-      role: "user",
-      approval_status: "pending",
+      role: isFirst ? "admin" : "user",
+      approval_status: isFirst ? "approved" : "pending",
       is_active: true,
       display_name: "",
       timezone: "Asia/Shanghai",
@@ -44,7 +51,8 @@ export const mockAuthApi: AuthApi = {
       password,
       created_at: new Date().toISOString(),
     });
-    // 待批准账号不签发会话，等管理员批准后再登录
+    // 注册一律不签发会话：管理员也走登录页拿 Cookie
+    return { admin: isFirst };
   },
   async logout() {
     state.sessionEmail = null;

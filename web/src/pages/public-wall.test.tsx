@@ -8,6 +8,7 @@ import type { PublicLetter } from "@/api/types";
 import type { MeProfile } from "@/api/settings";
 import { SAMPLE_LETTERS } from "@/data/sample-letters";
 import { useAuthStore } from "@/store/auth";
+import { useSetupStore } from "@/store/setup";
 
 vi.mock("@/api/public", () => ({
   fetchPublicLetters: vi.fn(),
@@ -68,6 +69,7 @@ function renderApp(initial = "/", authed = false, displayName: string | null = n
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
         <Route path="/" element={<PublicWallPage />} />
+        <Route path="/setup" element={<div>初始化占位</div>} />
         <Route path="/login" element={<LoginPage />} />
         <Route element={<RequireAuth />}>
           <Route path="/letters" element={<LettersPage />} />
@@ -81,10 +83,12 @@ function renderApp(initial = "/", authed = false, displayName: string | null = n
 
 beforeEach(() => {
   vi.mocked(fetchPublicLetters).mockReset();
+  useSetupStore.setState({ enabled: false });
 });
 
 afterEach(() => {
   useAuthStore.setState({ isAuthenticated: false, user: null, isLoading: false });
+  useSetupStore.setState({ enabled: null });
 });
 
 describe("公开信墙渲染状态族（先等数据加载完成再断言）", () => {
@@ -204,5 +208,26 @@ describe("受保护路由与工作台入口族", () => {
   it("登录后访问 `/settings` 在登录壳内渲染占位页", async () => {
     renderApp("/settings", true, "小满");
     expect((await screen.findAllByText(/设置/)).length).toBeGreaterThan(0);
+  });
+});
+
+describe("未初始化时的首页入口（ONE-314）", () => {
+  it("setup enabled 时首页给出「完成初始化」入口并指向 /setup", async () => {
+    mockApi([]);
+    useSetupStore.setState({ enabled: true });
+    renderApp();
+
+    expect(await screen.findByText(/本站尚未完成初始化/)).toBeInTheDocument();
+    const cta = screen.getByRole("link", { name: /完成初始化/ });
+    expect(cta).toHaveAttribute("href", "/setup");
+  });
+
+  it("setup 已关闭时不展示初始化入口", async () => {
+    mockApi([]);
+    useSetupStore.setState({ enabled: false });
+    renderApp();
+
+    expect(await screen.findByText("128")).toBeInTheDocument();
+    expect(screen.queryByText(/本站尚未完成初始化/)).not.toBeInTheDocument();
   });
 });
