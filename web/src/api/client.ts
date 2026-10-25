@@ -4,6 +4,7 @@ import { httpAuthApi, type AuthApi } from "./auth";
 import { httpAdminApi, type AdminApi } from "./admin";
 import { httpContactsApi, type ContactsApi } from "./contacts";
 import { httpLettersApi, type LettersApi } from "./letters";
+import { httpSetupApi, type SetupApi } from "./setup";
 import { httpSettingsApi, httpTwoFaApi, type SettingsApi, type TwoFaApi } from "./settings";
 import {
   mockAdminApi,
@@ -11,6 +12,7 @@ import {
   mockContactsApi,
   mockLettersApi,
   mockSettingsApi,
+  mockSetupApi,
   mockTwoFaApi,
 } from "./mock";
 
@@ -23,6 +25,7 @@ export const authApi: AuthApi = USE_MOCK ? mockAuthApi : httpAuthApi;
 export const settingsApi: SettingsApi = USE_MOCK ? mockSettingsApi : httpSettingsApi;
 export const twoFaApi: TwoFaApi = USE_MOCK ? mockTwoFaApi : httpTwoFaApi;
 export const adminApi: AdminApi = USE_MOCK ? mockAdminApi : httpAdminApi;
+export const setupApi: SetupApi = USE_MOCK ? mockSetupApi : httpSetupApi;
 
 /** 当前是否运行在联调 mock 模式（Passkey 等 WebAuthn 仪式在 mock 下走简化路径）。 */
 export const IS_MOCK = USE_MOCK;

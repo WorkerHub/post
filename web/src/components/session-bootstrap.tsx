@@ -1,13 +1,18 @@
 import { useEffect } from "react";
 
-import { settingsApi } from "@/api/client";
+import { setupApi, settingsApi } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useSetupStore } from "@/store/setup";
 
 // 会话自举：HttpOnly Cookie 无法被 JS 读取，靠 GET /api/me 判定登录态。
 // 成功则写入用户档案（含 role）；失败（401/网络错误）则置 isLoading=false 保持未登录。
+//
+// 同时自举 setup 状态（GET /api/setup/state）：未初始化时把入口引导到 /setup。
+// 取值失败保持 null——不阻断任何页面，由具体页面自行兜底。
 export function SessionBootstrap() {
   const setUser = useAuthStore((s) => s.setUser);
   const clear = useAuthStore((s) => s.clear);
+  const setSetupEnabled = useSetupStore((s) => s.setEnabled);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,6 +28,21 @@ export function SessionBootstrap() {
       cancelled = true;
     };
   }, [setUser, clear]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setupApi
+      .fetchState()
+      .then(({ enabled }) => {
+        if (!cancelled) setSetupEnabled(enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setSetupEnabled(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setSetupEnabled]);
 
   return null;
 }

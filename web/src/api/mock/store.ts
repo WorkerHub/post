@@ -33,6 +33,10 @@ export interface MockState {
   pendingLoginEmail: string | null;
   twofa: MockTwoFa;
   smtp: SmtpConfig;
+  /** setup（GET /api/setup/state）状态：true = 尚未初始化，无任何账号。 */
+  setupEnabled: boolean;
+  /** 联调 mock 的初始化密钥（仅内存态；真实密钥只在部署环境的 secret 里）。 */
+  setupExpectedSecret: string;
 }
 
 const DEFAULT_SMTP: SmtpConfig = {
@@ -86,6 +90,8 @@ function buildAccounts(): MockAccount[] {
   ];
 }
 
+export const MOCK_SETUP_SECRET = "mock-setup-secret";
+
 export const state: MockState = {
   seq: 0,
   letters: new Map(),
@@ -95,6 +101,9 @@ export const state: MockState = {
   pendingLoginEmail: null,
   twofa: { totp_enabled: false, passkey_enabled: false, pendingTotpSecret: null },
   smtp: { ...DEFAULT_SMTP },
+  // 默认 mock 场景是「已上线、已有账号」；全新部署用 seedFreshDeployment() 重置。
+  setupEnabled: false,
+  setupExpectedSecret: MOCK_SETUP_SECRET,
 };
 
 export function nextId(prefix: string): string {
@@ -116,6 +125,15 @@ export function resetMockStore(): void {
   state.pendingLoginEmail = null;
   state.twofa = { totp_enabled: false, passkey_enabled: false, pendingTotpSecret: null };
   state.smtp = { ...DEFAULT_SMTP };
+  state.setupEnabled = false;
+  state.setupExpectedSecret = MOCK_SETUP_SECRET;
+}
+
+/** 全新部署场景：无账号、有待完成的可视化初始化。 */
+export function seedFreshDeployment(): void {
+  resetMockStore();
+  state.accounts = [];
+  state.setupEnabled = true;
 }
 
 /** 手测用示例联系人（联调 mock 数据，交付汇报已明说）。 */
