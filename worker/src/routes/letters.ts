@@ -6,11 +6,10 @@ import { sanitizeBodyHtml } from "../services/sanitize";
 import { generateId } from "../core/auth";
 import {
   countRecipientsByLetter,
+  countSentRecipients,
   createLetter,
   deleteLetter,
-  deleteRecipientsByLetter,
   getLetterById,
-  insertRecipient,
   listLettersByUser,
   listRecipientsByLetter,
   resetFailedRecipientsForResend,
@@ -21,9 +20,17 @@ import { getContactById } from "../db/queries/contacts";
 
 // letters 业务路由（SPEC §5/§6，ONE-176 冻结契约）：
 // GET/POST /api/letters、GET/PUT/DELETE /api/letters/:id、PATCH /api/letters/:id、
-// POST /api/letters/:id/schedule|cancel|resend。
-// 状态流转：draft →（schedule，校验收件人非空、send_at 未来）→ scheduled →（cron）→ sent/failed；
-// scheduled 寄出前（attempts=0）可编辑内容/收件人/时间，可 cancel；failed 可 resend（attempts 归零）。
+// POST /api/letters/:id/schedule|cancel|resend|draft。
+//
+// 状态机（SPEC §5，ONE-176 复评后冻结）：
+//   draft → schedule → scheduled → cron 抢占 → sending → sent / failed
+//   scheduled → draft（撤回草稿）｜cancelled（取消）；failed → resend → scheduled（attempts 归零）
+//
+// 操作边界（不变量）：
+// - 内容/收件人编辑（PUT/PATCH 非 is_public 字段）：仅 draft，或 scheduled 且无已投递收件人（status='sent'）。
+// - scheduled 不变量：任何使信件处于 scheduled 的写入，收件人数量必须 >0 且 send_at 必须晚于当前时间，
+//   杜绝「空收件人幽灵发送 / 过去时间提前触发 / null send_at 死锁」。
+// - 已有 sent 收件人的信严禁重写收件人（防重复投递）；只能 cancel（若仍 scheduled）或等 cron 收尾。
 
 export const lettersRoutes = new Hono<HonoEnv>();
 lettersRoutes.use("*", authMiddleware);
@@ -96,11 +103,21 @@ async function fetchOwnedLetter(
   return letter;
 }
 
-/** 寄出前可编辑：draft 任意；scheduled 仅在尚未被 cron 尝试（attempts=0）时可编辑。 */
-function canEdit(letter: Letter): boolean {
-  if (letter.status === "draft") return true;
-  if (letter.status === "scheduled" && letter.attempts === 0) return true;
-  return false;
+/** 是否允许编辑内容/收件人（is_public 开关不在此列）。 */
+function isEditableStatus(letter: Letter): boolean {
+  return letter.status === "draft" || letter.status === "scheduled";
+}
+
+/** scheduled 不变量：收件人非空 + send_at 晚于当前时间。返回 null 表示通过。 */
+function scheduledInvariantError(
+  recipientCount: number,
+  sendAt: string | null,
+): string | null {
+  if (recipientCount === 0) return "请至少添加一位收件人";
+  if (!sendAt || new Date(sendAt).getTime() <= Date.now()) {
+    return "送达时间须晚于当前时间";
+  }
+  return null;
 }
 
 /** 校验并解析收件人快照：联系人引用读库落快照，手填校验格式，按邮箱去重。 */
@@ -238,21 +255,25 @@ async function parseLetterFields(
   return out;
 }
 
+/** 全量替换收件人快照（单原子 batch，杜绝半途失败留下部分缺失）。 */
 async function replaceRecipients(
   c: Context<HonoEnv>,
   letterId: string,
   recipients: ResolvedRecipient[],
 ): Promise<void> {
-  await deleteRecipientsByLetter(c.env.DB, letterId);
-  for (const r of recipients) {
-    await insertRecipient(c.env.DB, {
-      id: generateId(),
-      letter_id: letterId,
-      contact_id: r.contact_id,
-      name: r.name,
-      email: r.email,
-    });
-  }
+  const now = new Date().toISOString();
+  const statements = [
+    c.env.DB.prepare(
+      `DELETE FROM letter_recipients WHERE letter_id = ?`,
+    ).bind(letterId),
+    ...recipients.map((r) =>
+      c.env.DB.prepare(
+        `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?)`,
+      ).bind(generateId(), letterId, r.contact_id, r.name, r.email, now),
+    ),
+  ];
+  await c.env.DB.batch(statements);
 }
 
 async function respondWithLetter(
@@ -318,15 +339,19 @@ lettersRoutes.get("/:id", async (c) => {
   return respondWithLetter(c, letter.id);
 });
 
-// ─── 全量更新（寄出前可编辑，状态保持不变） ─────────────────────────────────
+// ─── 全量更新（寄出前可编辑，状态保持不变 + scheduled 不变量） ──────────────
 
 lettersRoutes.put("/:id", async (c) => {
   const userId = getAuthUserId(c);
   const id = c.req.param("id");
   const letter = await fetchOwnedLetter(c, id);
   if (!letter) return c.json({ error: "Not found" }, 404);
-  if (!canEdit(letter)) {
+
+  if (!isEditableStatus(letter)) {
     return c.json({ error: "寄出后不可再编辑" }, 409);
+  }
+  if (letter.status === "scheduled" && (await countSentRecipients(c.env.DB, id)) > 0) {
+    return c.json({ error: "已开始投递的信不可再编辑" }, 409);
   }
 
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
@@ -337,23 +362,30 @@ lettersRoutes.put("/:id", async (c) => {
   const parsed = await parseLetterFields(c, body, userId);
   if ("error" in parsed) return parsed.error;
 
-  const updates: LetterUpdate = {
+  const targetRecipients = parsed.recipients ?? [];
+  const targetSendAt = parsed.send_at ?? null;
+
+  // scheduled 不变量：编辑后仍为 scheduled，收件人必须非空且 send_at 未来。
+  if (letter.status === "scheduled") {
+    const invErr = scheduledInvariantError(targetRecipients.length, targetSendAt);
+    if (invErr) return c.json({ error: invErr }, 400);
+  }
+
+  await updateLetter(c.env.DB, id, {
     title: parsed.title ?? "",
     body_html: parsed.body_html ?? "",
     body_json: parsed.body_json ?? "",
-    send_at: parsed.send_at ?? null,
+    send_at: targetSendAt,
     timezone: parsed.timezone ?? "Asia/Shanghai",
     is_public: parsed.is_public ?? 0,
-  };
-  await updateLetter(c.env.DB, id, updates);
+  });
 
-  // PUT 全量替换收件人快照（未提供即清空）
-  await replaceRecipients(c, id, parsed.recipients ?? []);
+  await replaceRecipients(c, id, targetRecipients);
 
   return respondWithLetter(c, id);
 });
 
-// ─── 部分更新（is_public 开关即时下墙；其他字段同 PUT） ──────────────────────
+// ─── 部分更新（is_public 任意状态可切；其他字段同 PUT 边界 + 不变量） ────────
 
 lettersRoutes.patch("/:id", async (c) => {
   const userId = getAuthUserId(c);
@@ -366,7 +398,6 @@ lettersRoutes.patch("/:id", async (c) => {
     return c.json({ error: "Invalid request body" }, 400);
   }
 
-  // is_public 开关任何状态都允许（关掉即时下墙）；内容/收件人编辑仅在寄出前。
   const contentKeys = [
     "title",
     "body_html",
@@ -376,12 +407,32 @@ lettersRoutes.patch("/:id", async (c) => {
     "recipients",
   ];
   const hasContentEdit = contentKeys.some((k) => body[k] !== undefined);
-  if (hasContentEdit && !canEdit(letter)) {
-    return c.json({ error: "寄出后不可再编辑" }, 409);
+  if (hasContentEdit) {
+    if (!isEditableStatus(letter)) {
+      return c.json({ error: "寄出后不可再编辑" }, 409);
+    }
+    if (letter.status === "scheduled" && (await countSentRecipients(c.env.DB, id)) > 0) {
+      return c.json({ error: "已开始投递的信不可再编辑" }, 409);
+    }
   }
 
   const parsed = await parseLetterFields(c, body, userId);
   if ("error" in parsed) return parsed.error;
+
+  // 计算编辑后的有效值，用于 scheduled 不变量校验（先校验后写入，避免留下脏状态）。
+  const effectiveSendAt =
+    parsed.send_at !== undefined ? parsed.send_at : letter.send_at;
+  let effectiveRecipientCount: number | null = null;
+  if (parsed.recipients !== undefined) {
+    effectiveRecipientCount = parsed.recipients.length;
+  }
+
+  if (letter.status === "scheduled") {
+    const count =
+      effectiveRecipientCount ?? (await countRecipientsByLetter(c.env.DB, id));
+    const invErr = scheduledInvariantError(count, effectiveSendAt);
+    if (invErr) return c.json({ error: invErr }, 400);
+  }
 
   const updates: LetterUpdate = {};
   if (parsed.title !== undefined) updates.title = parsed.title;
@@ -402,11 +453,14 @@ lettersRoutes.patch("/:id", async (c) => {
   return respondWithLetter(c, id);
 });
 
-// ─── 删除 ─────────────────────────────────────────────────────────────────────
+// ─── 删除（sending 中禁止，其余状态级联删除收件人） ──────────────────────────
 
 lettersRoutes.delete("/:id", async (c) => {
   const letter = await fetchOwnedLetter(c, c.req.param("id"));
   if (!letter) return c.json({ error: "Not found" }, 404);
+  if (letter.status === "sending") {
+    return c.json({ error: "发送中，暂不可删除" }, 409);
+  }
   await deleteLetter(c.env.DB, letter.id);
   return c.json({ success: true });
 });
@@ -423,12 +477,8 @@ lettersRoutes.post("/:id/schedule", async (c) => {
   }
 
   const recipientCount = await countRecipientsByLetter(c.env.DB, id);
-  if (recipientCount === 0) {
-    return c.json({ error: "请至少添加一位收件人" }, 400);
-  }
-  if (!letter.send_at || new Date(letter.send_at).getTime() <= Date.now()) {
-    return c.json({ error: "送达时间须晚于当前时间" }, 400);
-  }
+  const invErr = scheduledInvariantError(recipientCount, letter.send_at);
+  if (invErr) return c.json({ error: invErr }, 400);
 
   if (letter.status === "draft") {
     await updateLetter(c.env.DB, id, {
@@ -438,6 +488,26 @@ lettersRoutes.post("/:id/schedule", async (c) => {
     });
   }
 
+  return respondWithLetter(c, id);
+});
+
+// scheduled → draft（撤回草稿）：仅在无已投递收件人时允许。
+lettersRoutes.post("/:id/draft", async (c) => {
+  const id = c.req.param("id");
+  const letter = await fetchOwnedLetter(c, id);
+  if (!letter) return c.json({ error: "Not found" }, 404);
+
+  if (letter.status === "draft") {
+    return respondWithLetter(c, id);
+  }
+  if (letter.status !== "scheduled") {
+    return c.json({ error: "仅待寄出的信可撤回草稿" }, 409);
+  }
+  if ((await countSentRecipients(c.env.DB, id)) > 0) {
+    return c.json({ error: "已开始投递的信不可撤回草稿" }, 409);
+  }
+
+  await updateLetter(c.env.DB, id, { status: "draft", last_error: null });
   return respondWithLetter(c, id);
 });
 

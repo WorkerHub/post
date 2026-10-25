@@ -145,15 +145,75 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     ]);
   });
 
-  it("cron 已尝试（attempts>0）的 scheduled 信不可再编辑", async () => {
+  it("scheduled 不变量：清空收件人/过去时间/null send_at 均被拒（防幽灵发送与死锁）", async () => {
     const { env, user } = await setupWithUser();
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
     await request(env, `/api/letters/${created.body.id}/schedule`, {
       method: "POST",
       headers: user,
     });
-    await env.DB.prepare(`UPDATE letters SET attempts = 1 WHERE id = ?`)
-      .bind(created.body.id)
+
+    // 清空收件人仍 scheduled → 幽灵发送，拒绝
+    const cleared = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PUT", payload({ recipients: [] }), user),
+    );
+    expect(cleared.status).toBe(400);
+
+    // 过去时间仍 scheduled → 提前触发，拒绝
+    const past = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PUT", payload({ send_at: "2020-01-01T00:00:00.000Z" }), user),
+    );
+    expect(past.status).toBe(400);
+
+    // null send_at 仍 scheduled → 死锁，拒绝
+    const clearedTime = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PUT", payload({ send_at: null }), user),
+    );
+    expect(clearedTime.status).toBe(400);
+  });
+
+  it("PATCH 清空收件人或 send_at 时同样受 scheduled 不变量约束", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${created.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+
+    const cleared = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PATCH", { recipients: [] }, user),
+    );
+    expect(cleared.status).toBe(400);
+
+    const clearedTime = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PATCH", { send_at: null }, user),
+    );
+    expect(clearedTime.status).toBe(400);
+  });
+
+  it("已投递（有 sent 收件人）的 scheduled 信不可再编辑，attempts 无关", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${created.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+
+    // 有一个收件人已 sent（部分投递），attempts 归零也无法编辑
+    await env.DB.prepare(
+      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+    )
+      .bind(new Date().toISOString(), created.body.id)
       .run();
 
     const updated = await request(
@@ -162,6 +222,63 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
       jsonInit("PUT", payload({ title: "改不了" }), user),
     );
     expect(updated.status).toBe(409);
+
+    const patched = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PATCH", { recipients: [{ name: "", email: "other@example.com" }] }, user),
+    );
+    expect(patched.status).toBe(409);
+  });
+
+  it("resend 后（有 sent 收件人）不可全量重写收件人，防重复投递", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    // 两个收件人：一个已 sent，一个 failed，信件置 failed
+    await env.DB.prepare(
+      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+    )
+      .bind(new Date().toISOString(), created.body.id)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
+       VALUES ('r2', ?, NULL, '', 'second@example.com', 'failed', 'boom', NULL, '2026-01-01')`,
+    )
+      .bind(created.body.id)
+      .run();
+    await env.DB.prepare(`UPDATE letters SET status = 'failed', attempts = 3 WHERE id = ?`)
+      .bind(created.body.id)
+      .run();
+
+    const resend = await request(env, `/api/letters/${created.body.id}/resend`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(resend.status).toBe(200);
+    expect(resend.body.status).toBe("scheduled");
+    expect(resend.body.attempts).toBe(0);
+
+    // 已有 sent 收件人，全量重写会被拒
+    const updated = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit(
+        "PUT",
+        payload({ recipients: [{ name: "", email: "third@example.com" }] }),
+        user,
+      ),
+    );
+    expect(updated.status).toBe(409);
+
+    // sent 收件人未被重写
+    const recipients = await env.DB.prepare(
+      `SELECT email, status FROM letter_recipients WHERE letter_id = ? ORDER BY id ASC`,
+    )
+      .bind(created.body.id)
+      .all<{ email: string; status: string }>();
+    const sent = recipients.results.filter((r) => r.status === "sent");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].email).toBe("friend@example.com");
   });
 
   it("cancel：scheduled → cancelled；resend：failed → scheduled 且 attempts 归零", async () => {
@@ -263,5 +380,71 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
       .bind(created.body.id)
       .first<{ c: number }>();
     expect(recipients!.c).toBe(0);
+  });
+
+  it("draft 回退：scheduled → draft；已投递/非 scheduled 被拒", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${created.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+
+    const reverted = await request(env, `/api/letters/${created.body.id}/draft`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(reverted.status).toBe(200);
+    expect(reverted.body.status).toBe("draft");
+
+    // 草稿再回退幂等
+    const again = await request(env, `/api/letters/${created.body.id}/draft`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(again.status).toBe(200);
+    expect(again.body.status).toBe("draft");
+
+    // 已投递（sent）不可回退
+    const s2 = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${s2.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+    await env.DB.prepare(
+      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+    )
+      .bind(new Date().toISOString(), s2.body.id)
+      .run();
+    const blocked = await request(env, `/api/letters/${s2.body.id}/draft`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(blocked.status).toBe(409);
+
+    // failed 不可回退（走 resend）
+    const failed = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await env.DB.prepare(`UPDATE letters SET status = 'failed' WHERE id = ?`)
+      .bind(failed.body.id)
+      .run();
+    const failDraft = await request(env, `/api/letters/${failed.body.id}/draft`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(failDraft.status).toBe(409);
+  });
+
+  it("sending 中信不可删除", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await env.DB.prepare(`UPDATE letters SET status = 'sending' WHERE id = ?`)
+      .bind(created.body.id)
+      .run();
+
+    const del = await request(env, `/api/letters/${created.body.id}`, {
+      method: "DELETE",
+      headers: user,
+    });
+    expect(del.status).toBe(409);
   });
 });

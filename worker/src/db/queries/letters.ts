@@ -135,6 +135,20 @@ export async function countRecipientsByLetter(
   return row?.count ?? 0;
 }
 
+/** 已投递成功的收件人数（>0 表示已部分/全部投递，禁止再重写收件人以防重复投递）。 */
+export async function countSentRecipients(
+  db: D1Database,
+  letterId: string,
+): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) as count FROM letter_recipients WHERE letter_id = ? AND status = 'sent'`,
+    )
+    .bind(letterId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
 export async function deleteRecipientsByLetter(
   db: D1Database,
   letterId: string,
