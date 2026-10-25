@@ -1,4 +1,4 @@
-import type { PublicLetter, PublicLettersResponse } from "@/api/types";
+import type { PublicLetter } from "@/api/types";
 
 // 示例信：墙为空或不足时展示并标注「示例」，有真实公开信后自动让位。
 // 仅包含冻结契约中的公开字段，不含任何私有信字段。
@@ -37,10 +37,3 @@ export const SAMPLE_LETTERS: readonly PublicLetter[] = [
     author_name: "阿澈",
   },
 ];
-
-// mock 职责：模拟「首访空墙」——站点已有寄出记录（total_sent），
-// 但尚无任何公开信，由前端按 SPEC §6 用 SAMPLE_LETTERS 补位。
-// 真实公开信的让位场景由测试 fixture 提供，不在生产 mock 里伪造真实信。
-export function buildMockResponse(): PublicLettersResponse {
-  return { total_sent: 128, letters: [] };
-}

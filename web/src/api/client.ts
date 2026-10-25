@@ -1,6 +1,5 @@
-// API 门面：后端④（letters/contacts/settings/admin 业务路由）就绪前用同形状 mock，
-// 接通后把 USE_MOCK 置 false 即切换到真实 fetch。
-// 见 ONE-175 / ONE-177 交付评论的交接说明。
+// API 门面：生产（vite build）走真实 http API；单测（vitest）走同形状 mock。
+// 接通/切换依据 import.meta.env.MODE，不在源码里手工改开关。
 import { httpAuthApi, type AuthApi } from "./auth";
 import { httpAdminApi, type AdminApi } from "./admin";
 import { httpContactsApi, type ContactsApi } from "./contacts";
@@ -15,7 +14,8 @@ import {
   mockTwoFaApi,
 } from "./mock";
 
-const USE_MOCK = true;
+// vitest 运行环境 MODE === "test"，其余（vite build → production）一律走真实 HTTP API。
+const USE_MOCK = import.meta.env.MODE === "test";
 
 export const lettersApi: LettersApi = USE_MOCK ? mockLettersApi : httpLettersApi;
 export const contactsApi: ContactsApi = USE_MOCK ? mockContactsApi : httpContactsApi;
