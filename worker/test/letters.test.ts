@@ -434,6 +434,77 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     expect(failDraft.status).toBe(409);
   });
 
+  it("cancelled 可回 draft 再编辑（前端③契约）", async () => {
+    const { env, user } = await setupWithUser();
+    const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${created.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+    await request(env, `/api/letters/${created.body.id}/cancel`, {
+      method: "POST",
+      headers: user,
+    });
+
+    // PUT 保存已取消信件 → 回 draft
+    const put = await request(
+      env,
+      `/api/letters/${created.body.id}`,
+      jsonInit("PUT", payload({ title: "重新编辑" }), user),
+    );
+    expect(put.status).toBe(200);
+    expect(put.body.status).toBe("draft");
+    expect(put.body.title).toBe("重新编辑");
+
+    // 再定时可重新进入 scheduled
+    const sched = await request(env, `/api/letters/${created.body.id}/schedule`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(sched.status).toBe(200);
+    expect(sched.body.status).toBe("scheduled");
+  });
+
+  it("cancelled 的 /draft 回退与 PATCH 内容编辑也回 draft；纯 is_public 不变", async () => {
+    const { env, user } = await setupWithUser();
+
+    // POST /:id/draft 放行 cancelled
+    const a = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${a.body.id}/schedule`, { method: "POST", headers: user });
+    await request(env, `/api/letters/${a.body.id}/cancel`, { method: "POST", headers: user });
+    const draftA = await request(env, `/api/letters/${a.body.id}/draft`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(draftA.status).toBe(200);
+    expect(draftA.body.status).toBe("draft");
+
+    // PATCH 内容编辑回 draft
+    const b = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${b.body.id}/schedule`, { method: "POST", headers: user });
+    await request(env, `/api/letters/${b.body.id}/cancel`, { method: "POST", headers: user });
+    const patchB = await request(
+      env,
+      `/api/letters/${b.body.id}`,
+      jsonInit("PATCH", { title: "改标题" }, user),
+    );
+    expect(patchB.status).toBe(200);
+    expect(patchB.body.status).toBe("draft");
+
+    // 纯 is_public 开关不改状态（仍 cancelled）
+    const c = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await request(env, `/api/letters/${c.body.id}/schedule`, { method: "POST", headers: user });
+    await request(env, `/api/letters/${c.body.id}/cancel`, { method: "POST", headers: user });
+    const patchC = await request(
+      env,
+      `/api/letters/${c.body.id}`,
+      jsonInit("PATCH", { is_public: true }, user),
+    );
+    expect(patchC.status).toBe(200);
+    expect(patchC.body.status).toBe("cancelled");
+    expect(patchC.body.is_public).toBe(true);
+  });
+
   it("sending 中信不可删除", async () => {
     const { env, user } = await setupWithUser();
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));

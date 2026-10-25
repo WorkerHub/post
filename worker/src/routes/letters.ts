@@ -25,9 +25,11 @@ import { getContactById } from "../db/queries/contacts";
 // 状态机（SPEC §5，ONE-176 复评后冻结）：
 //   draft → schedule → scheduled → cron 抢占 → sending → sent / failed
 //   scheduled → draft（撤回草稿）｜cancelled（取消）；failed → resend → scheduled（attempts 归零）
+//   cancelled → draft（前端③契约：已取消可回草稿再编辑）
 //
 // 操作边界（不变量）：
-// - 内容/收件人编辑（PUT/PATCH 非 is_public 字段）：仅 draft，或 scheduled 且无已投递收件人（status='sent'）。
+// - 内容/收件人编辑（PUT/PATCH 非 is_public 字段）：draft，或 scheduled 且无已投递收件人（status='sent'），
+//   或 cancelled（保存后回 draft）。
 // - scheduled 不变量：任何使信件处于 scheduled 的写入，收件人数量必须 >0 且 send_at 必须晚于当前时间，
 //   杜绝「空收件人幽灵发送 / 过去时间提前触发 / null send_at 死锁」。
 // - 已有 sent 收件人的信严禁重写收件人（防重复投递）；只能 cancel（若仍 scheduled）或等 cron 收尾。
@@ -103,9 +105,13 @@ async function fetchOwnedLetter(
   return letter;
 }
 
-/** 是否允许编辑内容/收件人（is_public 开关不在此列）。 */
+/** 是否允许编辑内容/收件人（is_public 开关不在此列）。cancelled 可回 draft 再编辑（前端③契约）。 */
 function isEditableStatus(letter: Letter): boolean {
-  return letter.status === "draft" || letter.status === "scheduled";
+  return (
+    letter.status === "draft" ||
+    letter.status === "scheduled" ||
+    letter.status === "cancelled"
+  );
 }
 
 /** scheduled 不变量：收件人非空 + send_at 晚于当前时间。返回 null 表示通过。 */
@@ -364,21 +370,25 @@ lettersRoutes.put("/:id", async (c) => {
 
   const targetRecipients = parsed.recipients ?? [];
   const targetSendAt = parsed.send_at ?? null;
+  // cancelled 保存后回 draft（前端③契约：已取消可再编辑）；其余状态保持不变。
+  const targetStatus = letter.status === "cancelled" ? "draft" : letter.status;
 
   // scheduled 不变量：编辑后仍为 scheduled，收件人必须非空且 send_at 未来。
-  if (letter.status === "scheduled") {
+  if (targetStatus === "scheduled") {
     const invErr = scheduledInvariantError(targetRecipients.length, targetSendAt);
     if (invErr) return c.json({ error: invErr }, 400);
   }
 
-  await updateLetter(c.env.DB, id, {
+  const updates: LetterUpdate = {
     title: parsed.title ?? "",
     body_html: parsed.body_html ?? "",
     body_json: parsed.body_json ?? "",
     send_at: targetSendAt,
     timezone: parsed.timezone ?? "Asia/Shanghai",
     is_public: parsed.is_public ?? 0,
-  });
+  };
+  if (targetStatus !== letter.status) updates.status = targetStatus;
+  await updateLetter(c.env.DB, id, updates);
 
   await replaceRecipients(c, id, targetRecipients);
 
@@ -420,6 +430,9 @@ lettersRoutes.patch("/:id", async (c) => {
   if ("error" in parsed) return parsed.error;
 
   // 计算编辑后的有效值，用于 scheduled 不变量校验（先校验后写入，避免留下脏状态）。
+  // cancelled 内容编辑后回 draft（前端③契约）；纯 is_public 开关保持原状态。
+  const targetStatus =
+    hasContentEdit && letter.status === "cancelled" ? "draft" : letter.status;
   const effectiveSendAt =
     parsed.send_at !== undefined ? parsed.send_at : letter.send_at;
   let effectiveRecipientCount: number | null = null;
@@ -427,7 +440,7 @@ lettersRoutes.patch("/:id", async (c) => {
     effectiveRecipientCount = parsed.recipients.length;
   }
 
-  if (letter.status === "scheduled") {
+  if (targetStatus === "scheduled") {
     const count =
       effectiveRecipientCount ?? (await countRecipientsByLetter(c.env.DB, id));
     const invErr = scheduledInvariantError(count, effectiveSendAt);
@@ -441,6 +454,7 @@ lettersRoutes.patch("/:id", async (c) => {
   if (parsed.send_at !== undefined) updates.send_at = parsed.send_at;
   if (parsed.timezone !== undefined) updates.timezone = parsed.timezone;
   if (parsed.is_public !== undefined) updates.is_public = parsed.is_public;
+  if (targetStatus !== letter.status) updates.status = targetStatus;
 
   if (Object.keys(updates).length > 0) {
     await updateLetter(c.env.DB, id, updates);
@@ -491,7 +505,7 @@ lettersRoutes.post("/:id/schedule", async (c) => {
   return respondWithLetter(c, id);
 });
 
-// scheduled → draft（撤回草稿）：仅在无已投递收件人时允许。
+// scheduled/cancelled → draft（撤回草稿）：scheduled 仅限无已投递收件人；cancelled 直接放行（前端③契约）。
 lettersRoutes.post("/:id/draft", async (c) => {
   const id = c.req.param("id");
   const letter = await fetchOwnedLetter(c, id);
@@ -500,10 +514,13 @@ lettersRoutes.post("/:id/draft", async (c) => {
   if (letter.status === "draft") {
     return respondWithLetter(c, id);
   }
-  if (letter.status !== "scheduled") {
-    return c.json({ error: "仅待寄出的信可撤回草稿" }, 409);
+  if (letter.status !== "scheduled" && letter.status !== "cancelled") {
+    return c.json({ error: "仅待寄出或已取消的信可撤回草稿" }, 409);
   }
-  if ((await countSentRecipients(c.env.DB, id)) > 0) {
+  if (
+    letter.status === "scheduled" &&
+    (await countSentRecipients(c.env.DB, id)) > 0
+  ) {
     return c.json({ error: "已开始投递的信不可撤回草稿" }, 409);
   }
 
