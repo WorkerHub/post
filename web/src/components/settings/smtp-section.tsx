@@ -104,7 +104,7 @@ export function SmtpSection() {
     );
   }
 
-  const passwordConfigured = Boolean(config?.password);
+  const passwordConfigured = Boolean(config?.password_set);
 
   return (
     <Card>

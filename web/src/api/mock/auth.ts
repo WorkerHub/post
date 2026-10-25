@@ -1,15 +1,8 @@
 // 联调 mock：鉴权（HttpOnly Cookie 会话形态的内存等价物）+ 登录态 2FA。
 import type { AuthApi } from "../auth";
-import type { MeProfile } from "../settings";
 import { nextId, state, toMeProfile } from "./store";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function currentAccount(): MeProfile | null {
-  if (!state.sessionEmail) return null;
-  const account = state.accounts.find((a) => a.email === state.sessionEmail);
-  return account ? toMeProfile(account) : null;
-}
 
 export const mockAuthApi: AuthApi = {
   async login(email, password) {
@@ -83,8 +76,3 @@ export const mockAuthApi: AuthApi = {
     return toMeProfile(account);
   },
 };
-
-/** 供 RequireAuth/bootstrap 判定：mock 会话存在与否。 */
-export function mockGetMe(): MeProfile | null {
-  return currentAccount();
-}

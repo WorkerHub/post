@@ -4,22 +4,29 @@ import { state, toAdminUser } from "./store";
 
 export const mockAdminApi: AdminApi = {
   async getSmtp() {
-    // 脱敏：只回显是否已配置，不返回明文（mock 里 password 本就为空/占位）
-    return { ...state.smtp, password: state.smtp.password ? "••••••••" : "" };
+    // 脱敏：永不下发明文密码，password 恒为空串，password_set 标记是否已配置
+    return {
+      ...state.smtp,
+      password: "",
+      password_set: Boolean(state.smtp.password),
+    };
   },
   async updateSmtp(patch: SmtpPatch) {
+    // password 留空表示不改（脱敏，不覆盖已配置值）
+    const password =
+      patch.password && patch.password.trim() !== "" ? patch.password : state.smtp.password;
     state.smtp = {
       host: patch.host,
       port: patch.port,
       username: patch.username,
-      // password 留空表示不改（脱敏，不覆盖已配置值）
-      password: patch.password && patch.password.trim() !== "" ? patch.password : state.smtp.password,
+      password,
+      password_set: Boolean(password),
       from: patch.from,
       from_name: patch.from_name,
     };
   },
-  async testSmtp(to): Promise<SmtpTestResult> {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim())) {
+  async testSmtp(email): Promise<SmtpTestResult> {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       throw new Error("收件邮箱格式不正确");
     }
     if (!state.smtp.host) {
@@ -30,7 +37,7 @@ export const mockAdminApi: AdminApi = {
     }
     return {
       success: true,
-      message: `测试邮件已通过 ${state.smtp.host}:${state.smtp.port} 发出，请查收 ${to.trim()}`,
+      message: `测试邮件已通过 ${state.smtp.host}:${state.smtp.port} 发出，请查收 ${email.trim()}`,
     };
   },
   async listUsers(): Promise<AdminUser[]> {

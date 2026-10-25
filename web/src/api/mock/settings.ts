@@ -10,12 +10,17 @@ function sessionAccount() {
 }
 
 export const mockSettingsApi: SettingsApi = {
-  async getMe() {
+  async fetchMe() {
     const account = sessionAccount();
     if (!account) throw new Error("401");
     return toMeProfile(account);
   },
-  async updateMe(patch: ProfilePatch) {
+  async getSettings() {
+    const account = sessionAccount();
+    if (!account) throw new Error("401");
+    return toMeProfile(account);
+  },
+  async updateSettings(patch: ProfilePatch) {
     const account = sessionAccount();
     if (!account) throw new Error("401");
     if (patch.display_name !== undefined) {

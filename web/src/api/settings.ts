@@ -1,8 +1,7 @@
-// 个人设置契约（ONE-172/ONE-176，与后端对齐，不得私下变更）：
-// 后端②已落地 GET/PUT /api/me（昵称/时区/语言 + 2FA 状态）；
+// 个人设置契约（ONE-176 冻结清单，与后端④ PR #10 对齐，不得私下变更）：
+// - GET/PUT /api/settings/me：设置页（昵称/时区/语言）读写，字段 display_name/timezone/language。
+// - GET /api/me：仅供 SessionBootstrap 鉴权自举，不用于设置读写（两者后端同源，见 index.ts）。
 // TOTP/Passkey 管理路由照 eNotify 移植形态（/api/auth/2fa/*）。
-// 注意：ONE-176 冻结清单写作 `GET/PUT /api/settings/me`，实际 stage 2 落地的路由是
-// `/api/me`，前端按已落地的真实路由对接（见 ONE-177 交付评论说明）。
 
 export type Role = "admin" | "user";
 
@@ -12,7 +11,7 @@ export interface TwoFAStatus {
   preferred_method: string | null;
 }
 
-/** GET /api/me 返回的当前用户档案（登录后会话内自描述）。 */
+/** GET /api/me（自举）与 GET /api/settings/me（设置读取）返回的当前用户档案。 */
 export interface MeProfile {
   id: string;
   email: string;
@@ -26,7 +25,7 @@ export interface MeProfile {
   twofa: TwoFAStatus;
 }
 
-/** PUT /api/me 载荷（昵称/时区/语言，字段可部分更新）。 */
+/** PUT /api/settings/me 载荷（昵称/时区/语言，字段可部分更新）。 */
 export interface ProfilePatch {
   display_name?: string;
   timezone?: string;
@@ -40,8 +39,12 @@ export interface TotpSetup {
 }
 
 export interface SettingsApi {
-  getMe(): Promise<MeProfile>;
-  updateMe(patch: ProfilePatch): Promise<void>;
+  /** SessionBootstrap 鉴权自举：GET /api/me（只判登录态与取档案，不用于设置读写）。 */
+  fetchMe(): Promise<MeProfile>;
+  /** 设置页读取：GET /api/settings/me。 */
+  getSettings(): Promise<MeProfile>;
+  /** 设置页写入（昵称/时区/语言）：PUT /api/settings/me。 */
+  updateSettings(patch: ProfilePatch): Promise<void>;
 }
 
 /** TOTP/Passkey 管理（设置页「安全」区块）。 */
@@ -65,14 +68,21 @@ async function parseError(res: Response): Promise<Error> {
   return new Error(message);
 }
 
+async function fetchProfile(url: string): Promise<MeProfile> {
+  const res = await fetch(url);
+  if (!res.ok) throw await parseError(res);
+  return (await res.json()) as MeProfile;
+}
+
 export const httpSettingsApi: SettingsApi = {
-  async getMe() {
-    const res = await fetch("/api/me");
-    if (!res.ok) throw await parseError(res);
-    return (await res.json()) as MeProfile;
+  async fetchMe() {
+    return fetchProfile("/api/me");
   },
-  async updateMe(patch) {
-    const res = await fetch("/api/me", {
+  async getSettings() {
+    return fetchProfile("/api/settings/me");
+  },
+  async updateSettings(patch) {
+    const res = await fetch("/api/settings/me", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),

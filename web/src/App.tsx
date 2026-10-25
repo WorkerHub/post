@@ -22,7 +22,7 @@ function SessionBootstrap() {
   useEffect(() => {
     let cancelled = false;
     settingsApi
-      .getMe()
+      .fetchMe()
       .then((user) => {
         if (!cancelled) setUser(user);
       })

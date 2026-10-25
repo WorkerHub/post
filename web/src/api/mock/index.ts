@@ -3,6 +3,6 @@
 export { resetMockStore, seedMockContacts, state } from "./store";
 export { mockLettersApi, seedMockLetters } from "./letters";
 export { mockContactsApi } from "./contacts";
-export { mockAuthApi, mockGetMe } from "./auth";
+export { mockAuthApi } from "./auth";
 export { mockSettingsApi, mockTwoFaApi } from "./settings";
 export { mockAdminApi } from "./admin";

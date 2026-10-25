@@ -43,7 +43,7 @@ export function ProfileSection({
     setNotice(null);
     setSaving(true);
     try {
-      await settingsApi.updateMe({
+      await settingsApi.updateSettings({
         display_name: displayName,
         timezone,
         language,

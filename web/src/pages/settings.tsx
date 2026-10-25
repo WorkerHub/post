@@ -13,7 +13,7 @@ export default function SettingsPage() {
 
   // 保存/2FA 变更后刷新档案（含 twofa 状态与 role）
   const refresh = useCallback(async () => {
-    const me = await settingsApi.getMe();
+    const me = await settingsApi.getSettings();
     setUser(me);
   }, [setUser]);
 

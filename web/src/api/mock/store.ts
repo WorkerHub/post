@@ -40,6 +40,7 @@ const DEFAULT_SMTP: SmtpConfig = {
   port: 465,
   username: "post@example.com",
   password: "", // 空串表示未配置（脱敏回显也不含明文）
+  password_set: false,
   from: "post@example.com",
   from_name: "时光邮局",
 };

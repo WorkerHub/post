@@ -1,9 +1,7 @@
-// 管理后台契约（ONE-172/ONE-176）：
-// - 用户管理复用 stage 2 已落地路由：GET /api/admin/users、GET/PUT/DELETE /api/admin/users/:uid、
-//   PUT /api/admin/users/:uid/approve。
-// - SMTP 配置为后端④路由：GET/PUT /api/admin/settings/smtp、POST /api/admin/settings/smtp/test。
-// 注意：ONE-176 冻结清单写作 `GET/PATCH /api/admin/users/:id`，实际 stage 2 落地为
-// `GET/PUT/DELETE /api/admin/users/:uid`，前端按已落地真实路由对接（见 ONE-177 交付评论说明）。
+// 管理后台契约（ONE-176 冻结清单，与后端④ PR #10 对齐，不得私下变更）：
+// - 用户管理：GET/POST /api/admin/users、GET/PATCH /api/admin/users/:id（PUT 兼容）、
+//   PUT /api/admin/users/:id/approve；无 DELETE（删除不在前端暴露）。
+// - SMTP 配置：GET/PUT /api/admin/settings/smtp、POST /api/admin/settings/smtp/test。
 import type { Role } from "./settings";
 
 /** GET /api/admin/users 返回的管理员视角用户（复用 publicUser 形状）。 */
@@ -19,13 +17,15 @@ export interface AdminUser {
   created_at: string;
 }
 
-/** SMTP 配置：密码脱敏返回（非空串表示已配置，不返回明文）。 */
+/** SMTP 配置：密码脱敏返回（password 恒为空串，password_set 标记是否已配置）。 */
 export interface SmtpConfig {
   host: string;
   port: number;
   username: string;
-  /** 脱敏标记：后端只回显是否已配置，不返回明文；前端提交留空表示不改。 */
+  /** 脱敏：后端永不下发明文密码，恒为空串。 */
   password: string;
+  /** 是否已配置密码（password 留空表示不改的依据）。 */
+  password_set: boolean;
   from: string;
   from_name: string;
 }
@@ -40,7 +40,7 @@ export interface SmtpPatch {
   from_name: string;
 }
 
-/** POST /api/admin/settings/smtp/test 结果：回显成功或错误原文。 */
+/** POST /api/admin/settings/smtp/test 结果：成功或回显错误原文。 */
 export interface SmtpTestResult {
   success: boolean;
   message: string;
@@ -49,10 +49,10 @@ export interface SmtpTestResult {
 export interface AdminApi {
   getSmtp(): Promise<SmtpConfig>;
   updateSmtp(patch: SmtpPatch): Promise<void>;
-  testSmtp(to: string): Promise<SmtpTestResult>;
+  testSmtp(email: string): Promise<SmtpTestResult>;
   listUsers(): Promise<AdminUser[]>;
   approveUser(id: string): Promise<void>;
-  /** 更新角色 / 禁用启用。 */
+  /** 更新角色 / 禁用启用（PATCH，后端 PUT 兼容）。 */
   updateUser(id: string, patch: { role?: Role; is_active?: boolean }): Promise<void>;
 }
 
@@ -81,24 +81,24 @@ export const httpAdminApi: AdminApi = {
     });
     if (!res.ok) throw await parseError(res);
   },
-  async testSmtp(to) {
+  async testSmtp(email) {
     const res = await fetch("/api/admin/settings/smtp/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to }),
+      body: JSON.stringify({ email }),
     });
     const body = (await res.json().catch(() => null)) as {
       success?: boolean;
-      message?: string;
       error?: string;
     } | null;
     if (!res.ok) {
-      throw new Error(body?.error || body?.message || `${res.status}`);
+      throw new Error(body?.error || `${res.status}`);
     }
-    return {
-      success: body?.success ?? true,
-      message: body?.message ?? "已发送",
-    };
+    // 后端成功时只回 { success: true }（无 message）；失败时回 { success: false, error }。
+    if (body?.success === false) {
+      return { success: false, message: body.error ?? "SMTP error" };
+    }
+    return { success: true, message: "测试邮件已发送，请查收收件箱" };
   },
   async listUsers() {
     const res = await fetch("/api/admin/users");
@@ -111,7 +111,7 @@ export const httpAdminApi: AdminApi = {
   },
   async updateUser(id, patch) {
     const res = await fetch(`/api/admin/users/${id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
