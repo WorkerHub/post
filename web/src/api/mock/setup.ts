@@ -5,6 +5,8 @@ import { state } from "./store";
 
 export const mockSetupApi: SetupApi = {
   async fetchState() {
+    // 开关 OFF：后端对 GET /api/setup/state 直接 404，不吐任何状态信息
+    if (!state.setupSwitchEnabled) throw new SetupError("Not found", 404);
     return { enabled: state.setupEnabled };
   },
   async submit(secret) {

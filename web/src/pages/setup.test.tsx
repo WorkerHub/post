@@ -128,3 +128,58 @@ describe("初始化页 · 已初始化（enabled=false）", () => {
     expect(useSetupStore.getState().enabled).toBe(true);
   });
 });
+
+// setup 页面开关（ONE-320）：管理员在设置页关掉开关后，GET /api/setup/state 回 404，
+// 浏览器访问 /setup 呈现 404 视图；开关 ON 时恢复既有行为。
+describe("初始化页 · setup 页面开关关闭 → 404", () => {
+  it("已初始化 + 开关关闭：只呈现 404，不吐任何初始化内容", async () => {
+    // 默认 mock 场景：本站已初始化（无待办 setup），管理员把开关关了
+    state.setupSwitchEnabled = false;
+    renderSetup();
+
+    expect(await screen.findByText("404")).toBeInTheDocument();
+    expect(screen.getByText("页面不存在")).toBeInTheDocument();
+    // 初始化页的任何界面都不出现（标题 / 密钥框 / 「已完成初始化」提示都没有）
+    expect(screen.queryByText("初始化时光邮局")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("初始化密钥")).not.toBeInTheDocument();
+    expect(screen.queryByText(/本站已完成初始化/)).not.toBeInTheDocument();
+    // 404 不能被当成「已初始化」写进 store
+    expect(useSetupStore.getState().enabled).toBeNull();
+    // 仍给出可去处
+    expect(screen.getByRole("link", { name: /返回首页/ })).toBeInTheDocument();
+  });
+
+  it("未初始化 + 开关关闭：开关优先，密钥输入框不出现", async () => {
+    seedFreshDeployment();
+    state.setupSwitchEnabled = false;
+    const { container } = renderSetup();
+
+    expect(await screen.findByText("404")).toBeInTheDocument();
+    expect(container.querySelectorAll("input")).toHaveLength(0);
+    // 状态也没被暴露出去（不会顺手把 enabled=true 写进全局 store）
+    expect(useSetupStore.getState().enabled).toBeNull();
+  });
+
+  it("开关重新开启 → 恢复既有行为（未初始化显示表单）", async () => {
+    seedFreshDeployment();
+    state.setupSwitchEnabled = false;
+    const { unmount } = renderSetup();
+    expect(await screen.findByText("404")).toBeInTheDocument();
+
+    // 管理员在设置页把开关打开
+    state.setupSwitchEnabled = true;
+    unmount();
+    renderSetup();
+
+    expect(await screen.findByLabelText("初始化密钥")).toBeInTheDocument();
+    expect(screen.queryByText("404")).not.toBeInTheDocument();
+  });
+
+  it("开关开启 + 已初始化 → 仍是「本站已完成初始化」而非 404", async () => {
+    state.setupSwitchEnabled = true;
+    renderSetup();
+
+    expect(await screen.findByText(/本站已完成初始化/)).toBeInTheDocument();
+    expect(screen.queryByText("404")).not.toBeInTheDocument();
+  });
+});

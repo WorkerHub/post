@@ -9,6 +9,7 @@ import { useSetupStore } from "@/store/setup";
 //
 // 同时自举 setup 状态（GET /api/setup/state）：未初始化时把入口引导到 /setup。
 // 取值失败保持 null——不阻断任何页面，由具体页面自行兜底。
+// setup 页面开关关闭时该接口 404（ONE-320），同样落到 null（不会把任何人引到 /setup）。
 export function SessionBootstrap() {
   const setUser = useAuthStore((s) => s.setUser);
   const clear = useAuthStore((s) => s.clear);

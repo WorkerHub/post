@@ -2,6 +2,10 @@
 // - 用户管理：GET/POST /api/admin/users、GET/PATCH /api/admin/users/:id（PUT 兼容）、
 //   PUT /api/admin/users/:id/approve；无 DELETE（删除不在前端暴露）。
 // - SMTP 配置：GET/PUT /api/admin/settings/smtp、POST /api/admin/settings/smtp/test。
+// - 系统维护（ONE-320，与后端⑤ ONE-319 冻结）：
+//   POST /api/admin/db-upgrade → 200 {success:true, ...摘要}；不属于契约的键按摘要展示。
+//   GET/POST /api/admin/setup-switch → {enabled:boolean}，POST body 只有 {enabled}。
+//   开关 OFF 时 GET /api/setup/state 返回 404（见 api/setup.ts 与 pages/setup.tsx）。
 import type { Role } from "./settings";
 
 /** GET /api/admin/users 返回的管理员视角用户（复用 publicUser 形状）。 */
@@ -46,6 +50,46 @@ export interface SmtpTestResult {
   message: string;
 }
 
+/** db-upgrade 摘要里的一条：键名按后端返回原样（契约只写「...摘要」，不假设键名）。 */
+export interface DbUpgradeSummaryItem {
+  label: string;
+  value: string;
+}
+
+/** POST /api/admin/db-upgrade 结果：success 恒由后端给出，摘要按返回原样罗列。 */
+export interface DbUpgradeResult {
+  success: boolean;
+  summary: DbUpgradeSummaryItem[];
+  /** 后端若回 message 时的原文（可选字段）。 */
+  message: string | null;
+}
+
+/** setup 页面开关状态：true = setup 页可用（默认 ON）。 */
+export interface SetupSwitchState {
+  enabled: boolean;
+}
+
+/** 已知摘要键的中文标签；未收录的键按后端原样展示（契约未冻结键名）。 */
+const SUMMARY_LABELS: Record<string, string> = {
+  table_prefix: "表前缀",
+  statements: "执行语句数",
+  executed: "执行语句数",
+  applied: "变更数",
+  duration_ms: "耗时（毫秒）",
+};
+
+/** 契约保留键，不当摘要展示。 */
+const RESERVED_KEYS = new Set(["success", "message", "error"]);
+
+function summarize(body: Record<string, unknown>): DbUpgradeSummaryItem[] {
+  return Object.entries(body)
+    .filter(([key, value]) => !RESERVED_KEYS.has(key) && value !== null && value !== undefined)
+    .map(([key, value]) => ({
+      label: SUMMARY_LABELS[key] ?? key,
+      value: typeof value === "string" ? value : JSON.stringify(value),
+    }));
+}
+
 export interface AdminApi {
   getSmtp(): Promise<SmtpConfig>;
   updateSmtp(patch: SmtpPatch): Promise<void>;
@@ -54,6 +98,12 @@ export interface AdminApi {
   approveUser(id: string): Promise<void>;
   /** 更新角色 / 禁用启用（PATCH，后端 PUT 兼容）。 */
   updateUser(id: string, patch: { role?: Role; is_active?: boolean }): Promise<void>;
+  /** 程序升级后免 SETUP_SECRET 就地升级数据库结构（幂等，可重复调用）。 */
+  dbUpgrade(): Promise<DbUpgradeResult>;
+  /** 读取 setup 页面开关。 */
+  getSetupSwitch(): Promise<SetupSwitchState>;
+  /** 写入 setup 页面开关；返回后端确认后的生效值。 */
+  updateSetupSwitch(enabled: boolean): Promise<SetupSwitchState>;
 }
 
 async function parseError(res: Response): Promise<Error> {
@@ -116,5 +166,36 @@ export const httpAdminApi: AdminApi = {
       body: JSON.stringify(patch),
     });
     if (!res.ok) throw await parseError(res);
+  },
+  async dbUpgrade() {
+    const res = await fetch("/api/admin/db-upgrade", { method: "POST" });
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!res.ok) {
+      const message = typeof body?.error === "string" ? body.error : `${res.status}`;
+      throw new Error(message);
+    }
+    return {
+      // 只有显式 success:false 才算失败（后端成功态回 {success:true,...}）
+      success: body?.success !== false,
+      summary: summarize(body ?? {}),
+      message: typeof body?.message === "string" ? body.message : null,
+    };
+  },
+  async getSetupSwitch() {
+    const res = await fetch("/api/admin/setup-switch");
+    if (!res.ok) throw await parseError(res);
+    const body = (await res.json()) as { enabled?: boolean };
+    return { enabled: body.enabled === true };
+  },
+  async updateSetupSwitch(enabled) {
+    const res = await fetch("/api/admin/setup-switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw await parseError(res);
+    const body = (await res.json().catch(() => null)) as { enabled?: boolean } | null;
+    // 契约 {success:true, enabled}；若后端漏回 enabled，以请求值为准，避免开关回弹到错值
+    return { enabled: typeof body?.enabled === "boolean" ? body.enabled : enabled };
   },
 };
