@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getDefaultSendAt,
+  getTimezones,
   getUserTimezone,
   isAfterNow,
   toLocalInputValue,
@@ -11,6 +12,39 @@ import {
 describe("getUserTimezone", () => {
   it("返回非空时区字符串（兜底 Asia/Shanghai）", () => {
     expect(getUserTimezone().length).toBeGreaterThan(0);
+  });
+});
+
+describe("getTimezones", () => {
+  it("返回冻结的 21 个常用时区，顺序固定", () => {
+    expect(getTimezones()).toEqual([
+      "UTC",
+      "Asia/Shanghai",
+      "Asia/Hong_Kong",
+      "Asia/Taipei",
+      "Asia/Singapore",
+      "Asia/Tokyo",
+      "Asia/Seoul",
+      "Asia/Bangkok",
+      "Asia/Kolkata",
+      "Asia/Dubai",
+      "Europe/London",
+      "Europe/Paris",
+      "Europe/Berlin",
+      "Europe/Moscow",
+      "America/New_York",
+      "America/Chicago",
+      "America/Denver",
+      "America/Los_Angeles",
+      "America/Toronto",
+      "Australia/Sydney",
+      "Pacific/Auckland",
+    ]);
+  });
+  it("无重复项，且默认时区在列表内", () => {
+    const list = getTimezones();
+    expect(new Set(list).size).toBe(list.length);
+    expect(list).toContain("Asia/Shanghai");
   });
 });
 

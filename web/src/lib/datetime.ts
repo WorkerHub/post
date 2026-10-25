@@ -47,23 +47,32 @@ export function isAfterNow(localInputValue: string, now: Date = new Date()): boo
   return t > now.getTime();
 }
 
-/** IANA 时区列表（供设置页下拉选择）：优先取运行时支持值，失败退回常用子集。 */
+/** 常用 IANA 时区固定列表（供设置页下拉选择，顺序即显示顺序）。 */
+const TIMEZONES: readonly string[] = [
+  "UTC",
+  "Asia/Shanghai",
+  "Asia/Hong_Kong",
+  "Asia/Taipei",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Asia/Bangkok",
+  "Asia/Kolkata",
+  "Asia/Dubai",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Moscow",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Toronto",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+/** IANA 时区列表（供设置页下拉选择）：固定常用列表，保证顺序与结果稳定。 */
 export function getTimezones(): string[] {
-  try {
-    const tz = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
-    if (tz) return tz("timeZone");
-  } catch {
-    // 旧环境不支持，退回到静态列表
-  }
-  return [
-    "Asia/Shanghai",
-    "Asia/Hong_Kong",
-    "Asia/Tokyo",
-    "Asia/Singapore",
-    "Europe/London",
-    "Europe/Paris",
-    "America/New_York",
-    "America/Los_Angeles",
-    "UTC",
-  ];
+  return [...TIMEZONES];
 }
