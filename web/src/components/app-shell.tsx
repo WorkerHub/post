@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { Mail, Feather, Settings, Users, FileText, LogOut } from "lucide-react";
 
+import { authApi } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/auth";
 
@@ -14,6 +15,12 @@ const NAV_ITEMS = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const clear = useAuthStore((s) => s.clear);
+
+  const handleLogout = () => {
+    // 先清后端 HttpOnly Cookie 会话，再清本地登录态（失败也照样退出本地）
+    void authApi.logout().catch(() => {});
+    clear();
+  };
 
   return (
     <div className="min-h-dvh">
@@ -43,7 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             variant="ghost"
             size="sm"
             className="shrink-0"
-            onClick={() => clear()}
+            onClick={handleLogout}
             aria-label="退出登录"
           >
             <LogOut className="size-4" />

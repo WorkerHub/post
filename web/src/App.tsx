@@ -2,10 +2,12 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "@/components/require-auth";
+import { SessionBootstrap } from "@/components/session-bootstrap";
 import ContactsPage from "@/pages/contacts";
 import LettersPage from "@/pages/letters";
 import LoginPage from "@/pages/login";
 import PublicWallPage from "@/pages/public-wall";
+import RegisterPage from "@/pages/register";
 import SettingsPage from "@/pages/settings";
 
 // 写信页按需加载：TipTap/ProseMirror 体积较大，仅访问 /compose 时才拉取，
@@ -18,10 +20,12 @@ const ComposePage = lazy(() => import("@/pages/compose"));
 export default function App() {
   return (
     <BrowserRouter>
+      <SessionBootstrap />
       <Suspense fallback={<div className="py-16 text-center text-sm text-ink-500">加载中…</div>}>
         <Routes>
           <Route path="/" element={<PublicWallPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route element={<RequireAuth />}>
             <Route path="/letters" element={<LettersPage />} />
             <Route path="/compose/:id?" element={<ComposePage />} />

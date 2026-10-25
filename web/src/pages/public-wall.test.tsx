@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RequireAuth } from "@/components/require-auth";
 import { fetchPublicLetters } from "@/api/public";
 import type { PublicLetter } from "@/api/types";
+import type { MeProfile } from "@/api/settings";
 import { SAMPLE_LETTERS } from "@/data/sample-letters";
 import { useAuthStore } from "@/store/auth";
 
@@ -41,9 +42,28 @@ function mockApi(letters: PublicLetter[], totalSent = 128) {
   });
 }
 
+function mockUser(displayName: string | null): MeProfile {
+  return {
+    id: "u-test",
+    email: "a@b.com",
+    role: "user",
+    is_active: true,
+    approval_status: "approved",
+    display_name: displayName ?? "",
+    timezone: "Asia/Shanghai",
+    language: "zh",
+    created_at: "2026-10-24T00:00:00.000Z",
+    twofa: { totp_enabled: false, passkey_enabled: false, preferred_method: null },
+  };
+}
+
 // 与 App.tsx 同构的路由表，验证真实分流/守卫逻辑
 function renderApp(initial = "/", authed = false, displayName: string | null = null) {
-  useAuthStore.setState({ isAuthenticated: authed, displayName });
+  useAuthStore.setState({
+    isAuthenticated: authed,
+    user: authed ? mockUser(displayName) : null,
+    isLoading: false,
+  });
   return render(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
@@ -64,7 +84,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useAuthStore.setState({ isAuthenticated: false, displayName: null });
+  useAuthStore.setState({ isAuthenticated: false, user: null, isLoading: false });
 });
 
 describe("公开信墙渲染状态族（先等数据加载完成再断言）", () => {
