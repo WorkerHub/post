@@ -108,7 +108,11 @@ export async function updateLetter(
 }
 
 export async function deleteLetter(db: D1Database, id: string): Promise<void> {
-  await db.prepare(`DELETE FROM letters WHERE id = ?`).bind(id).run();
+  // 双重防御：显式清理收件人快照，不依赖 D1 连接的 PRAGMA foreign_keys 级联。
+  await db.batch([
+    db.prepare(`DELETE FROM letter_recipients WHERE letter_id = ?`).bind(id),
+    db.prepare(`DELETE FROM letters WHERE id = ?`).bind(id),
+  ]);
 }
 
 // ─── 收件人快照 ───────────────────────────────────────────────────────────────

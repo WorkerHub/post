@@ -233,7 +233,12 @@ async function parseLetterFields(
     out.body_html = sanitizeBodyHtml(html);
   }
   if (body.body_json !== undefined) {
-    out.body_json = typeof body.body_json === "string" ? body.body_json : "";
+    out.body_json =
+      typeof body.body_json === "string"
+        ? body.body_json
+        : typeof body.body_json === "object" && body.body_json !== null
+          ? JSON.stringify(body.body_json)
+          : "";
   }
   if (body.send_at !== undefined) {
     if (body.send_at === null || body.send_at === "") {
