@@ -11,6 +11,7 @@ import { lettersRoutes } from "./routes/letters";
 import { contactsRoutes } from "./routes/contacts";
 import { publicRoutes } from "./routes/public";
 import { adminSmtpRoutes } from "./routes/admin-smtp";
+import { adminSystemRoutes } from "./routes/admin-system";
 import { processDueLetters } from "./services/scheduler";
 
 export const app = new Hono<HonoEnv>();
@@ -58,6 +59,8 @@ app.route("/api/letters", lettersRoutes);
 app.route("/api/contacts", contactsRoutes);
 app.route("/api/public", publicRoutes);
 app.route("/api/admin/settings", adminSmtpRoutes);
+// ONE-319 管理后台维护接口：升级数据库 + setup 页面开关（管理员会话鉴权）。
+app.route("/api/admin", adminSystemRoutes);
 app.route("/api/admin", adminRoutes);
 
 app.get("/api/health", (c) =>

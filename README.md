@@ -57,6 +57,12 @@ post 使用组织共享 D1，表名一律带前缀（ONE-269）。三态解析�
 - 登录：密码 + 可选 TOTP/Passkey 二步验证；会话为 HttpOnly Cookie（access 24h / refresh 7d，SameSite=Strict）。
 - 用户自服务：`/api/me`（昵称/时区/语言、改密码、会话管理）；管理员：`/api/admin/users`（批准/禁用/角色）。
 
+### 管理后台维护接口（ONE-319）
+
+- `POST /api/admin/db-upgrade`（管理员会话）：程序升级后免 `SETUP_SECRET` 升级数据库。执行与初始化同一份 `ensureSchema`（`CREATE TABLE/INDEX IF NOT EXISTS`，幂等、不改数据），返回 `{success:true, table_prefix, statements}`；可重复调用。
+- `GET /api/admin/setup-switch`（管理员会话）→ `{enabled:boolean}`；`POST /api/admin/setup-switch`（管理员会话，body `{enabled:boolean}`）→ `{success:true, enabled}`。开关与 SMTP 配置同库存放：`{prefix}system_settings` 的 `setup_page_switch` 键（无新表/新键，无需迁移），默认 ON。
+- 开关 OFF 后 `GET /api/setup/state` 一律 404（浏览器访问 setup 页即 404）；ON 时恢复既有 `isSetupAvailable` 判定（`setup_page_enabled` 初始化标记 + 账号数为 0）。两者是不同的键：`setup_page_enabled` 由 `POST /api/setup` 写死，管理后台只改 `setup_page_switch`。
+
 ## 校验命令（CI 同款）
 
 ```bash
