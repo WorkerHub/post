@@ -172,7 +172,17 @@ export default function PublicWallPage() {
       </main>
 
       <footer className="border-t border-paper-300 py-6 text-center text-xs text-ink-500">
-        {APP_VERSION}
+        {/* 版本号保留（ONE-333），右侧补「关于」入口（ONE-337） */}
+        <span>{APP_VERSION}</span>
+        <span aria-hidden className="mx-2 text-paper-300">
+          ·
+        </span>
+        <Link
+          to="/about"
+          className="underline-offset-4 transition-colors hover:text-seal-600 hover:underline"
+        >
+          关于
+        </Link>
       </footer>
     </div>
   );
