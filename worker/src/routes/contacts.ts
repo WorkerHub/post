@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { HonoEnv, Contact } from "../types";
+import { getTablePrefix } from "../types";
 import { authMiddleware, getAuthUserId } from "../middleware/auth";
 import { isValidEmail } from "../services/email";
 import { generateId } from "../core/auth";
@@ -80,7 +81,7 @@ async function fetchOwnedContact(
   c: Context<HonoEnv>,
   id: string,
 ): Promise<Contact | null> {
-  const contact = await getContactById(c.env.DB, id);
+  const contact = await getContactById(c.env.DB, getTablePrefix(c.env), id);
   if (!contact || contact.user_id !== getAuthUserId(c)) return null;
   return contact;
 }
@@ -92,7 +93,7 @@ contactsRoutes.get("/", async (c) => {
   const q = (c.req.query("q") || "").trim().toLowerCase();
   const tag = (c.req.query("tag") || "").trim().toLowerCase();
 
-  let contacts = await listContactsByUser(c.env.DB, userId);
+  let contacts = await listContactsByUser(c.env.DB, getTablePrefix(c.env), userId);
 
   if (q) {
     contacts = contacts.filter(
@@ -136,11 +137,16 @@ contactsRoutes.post("/", async (c) => {
   const tagsRes = cleanTags(body.tags);
   if (tagsRes.error) return c.json({ error: tagsRes.error }, 400);
 
-  const existing = await findContactByUserEmail(c.env.DB, userId, email);
+  const existing = await findContactByUserEmail(
+    c.env.DB,
+    getTablePrefix(c.env),
+    userId,
+    email,
+  );
   if (existing) return c.json({ error: "该邮箱已在联系人中" }, 409);
 
   const id = generateId();
-  await createContact(c.env.DB, {
+  await createContact(c.env.DB, getTablePrefix(c.env), {
     id,
     user_id: userId,
     name,
@@ -149,7 +155,7 @@ contactsRoutes.post("/", async (c) => {
     tags: JSON.stringify(tagsRes.tags ?? []),
   });
 
-  const created = await getContactById(c.env.DB, id);
+  const created = await getContactById(c.env.DB, getTablePrefix(c.env), id);
   return c.json(serializeContact(created!), 201);
 });
 
@@ -180,7 +186,12 @@ contactsRoutes.put("/:id", async (c) => {
     return c.json({ error: "邮箱格式不正确" }, 400);
   }
 
-  const existing = await findContactByUserEmail(c.env.DB, userId, email);
+  const existing = await findContactByUserEmail(
+    c.env.DB,
+    getTablePrefix(c.env),
+    userId,
+    email,
+  );
   if (existing && existing.id !== id) {
     return c.json({ error: "该邮箱已在联系人中" }, 409);
   }
@@ -188,14 +199,14 @@ contactsRoutes.put("/:id", async (c) => {
   const tagsRes = cleanTags(body.tags);
   if (tagsRes.error) return c.json({ error: tagsRes.error }, 400);
 
-  await updateContact(c.env.DB, id, {
+  await updateContact(c.env.DB, getTablePrefix(c.env), id, {
     name: cleanName(body.name),
     email,
     notes: cleanNotes(body.notes),
     tags: JSON.stringify(tagsRes.tags ?? []),
   });
 
-  const updated = await getContactById(c.env.DB, id);
+  const updated = await getContactById(c.env.DB, getTablePrefix(c.env), id);
   return c.json(serializeContact(updated!));
 });
 
@@ -204,6 +215,6 @@ contactsRoutes.put("/:id", async (c) => {
 contactsRoutes.delete("/:id", async (c) => {
   const contact = await fetchOwnedContact(c, c.req.param("id"));
   if (!contact) return c.json({ error: "Not found" }, 404);
-  await deleteContact(c.env.DB, contact.id);
+  await deleteContact(c.env.DB, getTablePrefix(c.env), contact.id);
   return c.json({ success: true });
 });

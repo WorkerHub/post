@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../types";
+import { getTablePrefix } from "../types";
 import { authMiddleware, adminMiddleware } from "../middleware/auth";
 import { getSetting, setSetting } from "../db/queries/users";
 import {
@@ -30,8 +31,8 @@ const EMPTY_SMTP: SMTPConfig = {
   from_name: "",
 };
 
-async function readConfig(db: D1Database): Promise<SMTPConfig> {
-  const raw = await getSetting(db, SMTP_KEY);
+async function readConfig(db: D1Database, prefix: string): Promise<SMTPConfig> {
+  const raw = await getSetting(db, prefix, SMTP_KEY);
   if (!raw) return { ...EMPTY_SMTP };
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -64,7 +65,7 @@ function maskConfig(config: SMTPConfig) {
 }
 
 adminSmtpRoutes.get("/smtp", async (c) => {
-  const config = await readConfig(c.env.DB);
+  const config = await readConfig(c.env.DB, getTablePrefix(c.env));
   return c.json(maskConfig(config));
 });
 
@@ -74,7 +75,7 @@ adminSmtpRoutes.put("/smtp", async (c) => {
     return c.json({ error: "Invalid request body" }, 400);
   }
 
-  const existing = await readConfig(c.env.DB);
+  const existing = await readConfig(c.env.DB, getTablePrefix(c.env));
 
   const host = typeof body.host === "string" ? body.host.trim() : "";
   if (host && !isValidSmtpHost(host)) {
@@ -115,7 +116,7 @@ adminSmtpRoutes.put("/smtp", async (c) => {
     from,
     from_name: fromName,
   };
-  await setSetting(c.env.DB, SMTP_KEY, JSON.stringify(next));
+  await setSetting(c.env.DB, getTablePrefix(c.env), SMTP_KEY, JSON.stringify(next));
 
   return c.json(maskConfig(next));
 });

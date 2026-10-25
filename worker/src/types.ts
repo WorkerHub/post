@@ -4,6 +4,11 @@ export interface Env {
   JWT_SECRET: string;
   SETUP_SECRET: string;
   ASSETS: Fetcher;
+  /**
+   * 表前缀（非 secret，GitHub Variables / Wrangler [vars] 注入）。
+   * undefined → 默认 "post_"；"" → 显式无前缀；其他值需匹配 /^[a-z0-9_]*$/。
+   */
+  TABLE_PREFIX?: string;
 }
 
 export type HonoEnv = {
@@ -100,4 +105,45 @@ export interface SystemSetting {
   key: string;
   value: string;
   updated_at: string;
+}
+
+// ─── 表前缀（ONE-269 冻结契约） ───────────────────────────────────────────────
+
+/** 项目默认表前缀——全仓库唯一允许写死的表名常量。 */
+export const DEFAULT_TABLE_PREFIX = "post_";
+
+/** 小写字母 / 数字 / 下划线；尾部 "_" 由部署方在变量值里自带。 */
+const TABLE_PREFIX_RE = /^[a-z0-9_]*$/;
+
+export function isValidTablePrefix(prefix: string): boolean {
+  return TABLE_PREFIX_RE.test(prefix);
+}
+
+/**
+ * 表前缀三态解析（照 nav 现行实现）：
+ * - undefined → DEFAULT_TABLE_PREFIX（"post_"）——共享 D1 零配置隔离；
+ * - ""       → ""（显式无前缀，部署方自担表名冲突风险）；
+ * - 其他     → 先经 isValidTablePrefix 校验，非法抛错；合法则原样返回配置值（不自动补下划线）。
+ */
+export function getTablePrefix(env: Pick<Env, "TABLE_PREFIX">): string {
+  const raw = env.TABLE_PREFIX;
+  if (raw === undefined) return DEFAULT_TABLE_PREFIX;
+  if (raw === "") return "";
+  if (!isValidTablePrefix(raw)) {
+    throw new Error(`invalid TABLE_PREFIX "${raw}": must match /^[a-z0-9_]*$/`);
+  }
+  return raw;
+}
+
+/** 6 张表的解析后表名（对齐 Zeta tables(env) 形态），内部复用三态解析。 */
+export function tables(env: Pick<Env, "TABLE_PREFIX">) {
+  const p = getTablePrefix(env);
+  return {
+    users: `${p}users`,
+    user_2fa: `${p}user_2fa`,
+    letters: `${p}letters`,
+    letter_recipients: `${p}letter_recipients`,
+    contacts: `${p}contacts`,
+    system_settings: `${p}system_settings`,
+  };
 }

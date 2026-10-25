@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { makeEnv } from "./helpers";
-import type { Env } from "../src/types";
+import { tables, type Env } from "../src/types";
 import {
   isValidEmail,
   isValidSmtpHost,
@@ -15,7 +15,7 @@ async function setSmtpConfig(
   config: Record<string, unknown>,
 ): Promise<void> {
   await env.DB.prepare(
-    `INSERT INTO system_settings (key, value, updated_at) VALUES ('smtp_config', ?, '2026-01-01')
+    `INSERT INTO ${tables(env).system_settings} (key, value, updated_at) VALUES ('smtp_config', ?, '2026-01-01')
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   )
     .bind(JSON.stringify(config))
@@ -72,7 +72,7 @@ describe("sendEmail 输入校验（照 email-notify.ts）", () => {
   it("smtp_config JSON 非法时报错", async () => {
     const env = makeEnv();
     await env.DB.prepare(
-      `INSERT INTO system_settings (key, value, updated_at) VALUES ('smtp_config', 'not-json', '2026-01-01')`,
+      `INSERT INTO ${tables(env).system_settings} (key, value, updated_at) VALUES ('smtp_config', 'not-json', '2026-01-01')`,
     ).run();
     expect(await sendEmail(env, OPTIONS)).toEqual({
       success: false,

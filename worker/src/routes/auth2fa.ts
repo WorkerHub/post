@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { HonoEnv, JWTPayload } from "../types";
+import { getTablePrefix } from "../types";
 import { authMiddleware, rateLimit } from "../middleware/auth";
 import { get2FAConfig, upsert2FAConfig, findUserById } from "../db/queries/users";
 import {
@@ -30,7 +31,7 @@ async function requirePassword(
     return c.json({ error: "Password required" }, 400);
   }
   const userId = c.get("userId");
-  const user = await findUserById(c.env.DB, userId);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), userId);
   if (!user) return c.json({ error: "User not found" }, 404);
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) return c.json({ error: "Password is incorrect" }, 403);
@@ -64,7 +65,8 @@ auth2faRoutes.post("/verify", async (c) => {
     return c.json({ error: "Invalid or expired 2FA session" }, 401);
   }
 
-  const config = await get2FAConfig(c.env.DB, userId);
+  const prefix = getTablePrefix(c.env);
+  const config = await get2FAConfig(c.env.DB, prefix, userId);
   if (!config) {
     return c.json({ error: "2FA not configured" }, 400);
   }
@@ -94,7 +96,7 @@ auth2faRoutes.post("/verify", async (c) => {
   await c.env.KV.delete(`2fa:${tempToken}`);
   await c.env.KV.delete(`2fa_fail:${tempToken}`);
 
-  const user = await findUserById(c.env.DB, userId);
+  const user = await findUserById(c.env.DB, prefix, userId);
   if (!user) return c.json({ error: "User not found" }, 404);
   if (!user.is_active) return c.json({ error: "Account is disabled" }, 403);
   if (user.approval_status !== "approved") {
@@ -171,7 +173,7 @@ auth2faRoutes.use("/passkey/disable", authMiddleware);
 // TOTP setup (POST for frontend compatibility)
 auth2faRoutes.post("/totp/setup", async (c) => {
   const userId = c.get("userId");
-  const user = await findUserById(c.env.DB, userId);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), userId);
   if (!user) return c.json({ error: "User not found" }, 404);
 
   const { secret, uri } = await generateTOTPSecret(user.email);
@@ -186,7 +188,8 @@ auth2faRoutes.post("/totp/enable", async (c) => {
   const { code } = await c.req.json<{ code: string }>();
   if (!code) return c.json({ error: "Code required" }, 400);
 
-  const existingCfg = await get2FAConfig(c.env.DB, userId);
+  const prefix = getTablePrefix(c.env);
+  const existingCfg = await get2FAConfig(c.env.DB, prefix, userId);
   if (existingCfg?.totp_enabled)
     return c.json({ error: "TOTP already enabled; disable it first" }, 400);
 
@@ -196,7 +199,7 @@ auth2faRoutes.post("/totp/enable", async (c) => {
   const valid = await verifyTOTPAsync(secret, code, c.env, userId);
   if (!valid) return c.json({ error: "Invalid code" }, 400);
 
-  await upsert2FAConfig(c.env.DB, userId, {
+  await upsert2FAConfig(c.env.DB, prefix, userId, {
     totp_secret: secret,
     totp_enabled: 1,
   });
@@ -212,7 +215,7 @@ auth2faRoutes.delete("/totp", authMiddleware, async (c) => {
   if (pwErr) return pwErr;
   const userId = c.get("userId");
 
-  await upsert2FAConfig(c.env.DB, userId, {
+  await upsert2FAConfig(c.env.DB, getTablePrefix(c.env), userId, {
     totp_secret: null,
     totp_enabled: 0,
   });
@@ -226,7 +229,7 @@ auth2faRoutes.post("/totp/disable", async (c) => {
   if (pwErr) return pwErr;
   const userId = c.get("userId");
 
-  await upsert2FAConfig(c.env.DB, userId, {
+  await upsert2FAConfig(c.env.DB, getTablePrefix(c.env), userId, {
     totp_secret: null,
     totp_enabled: 0,
   });
@@ -240,7 +243,7 @@ auth2faRoutes.post("/passkey/disable", async (c) => {
   if (pwErr) return pwErr;
   const userId = c.get("userId");
 
-  await upsert2FAConfig(c.env.DB, userId, {
+  await upsert2FAConfig(c.env.DB, getTablePrefix(c.env), userId, {
     passkey_credentials: null,
     passkey_enabled: 0,
   });
@@ -251,14 +254,14 @@ auth2faRoutes.post("/passkey/disable", async (c) => {
 // Passkey register options
 auth2faRoutes.post("/passkey/register/options", async (c) => {
   const userId = c.get("userId");
-  const user = await findUserById(c.env.DB, userId);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), userId);
   if (!user) return c.json({ error: "User not found" }, 404);
 
   const { generateRegistrationOptions } = await import(
     "@simplewebauthn/server"
   );
 
-  const config = await get2FAConfig(c.env.DB, userId);
+  const config = await get2FAConfig(c.env.DB, getTablePrefix(c.env), userId);
   const existingCredentials = config?.passkey_credentials
     ? JSON.parse(config.passkey_credentials)
     : [];
@@ -308,7 +311,8 @@ auth2faRoutes.post("/passkey/register/verify", async (c) => {
   }
 
   const { credential } = verification.registrationInfo;
-  const config = await get2FAConfig(c.env.DB, userId);
+  const prefix = getTablePrefix(c.env);
+  const config = await get2FAConfig(c.env.DB, prefix, userId);
   const existingCredentials = config?.passkey_credentials
     ? JSON.parse(config.passkey_credentials)
     : [];
@@ -322,7 +326,7 @@ auth2faRoutes.post("/passkey/register/verify", async (c) => {
     createdAt: new Date().toISOString(),
   });
 
-  await upsert2FAConfig(c.env.DB, userId, {
+  await upsert2FAConfig(c.env.DB, prefix, userId, {
     passkey_credentials: JSON.stringify(existingCredentials),
     passkey_enabled: 1,
   });
@@ -340,7 +344,7 @@ auth2faRoutes.post("/passkey/authenticate/options", async (c) => {
   const userId = await c.env.KV.get(`2fa:${tempToken}`);
   if (!userId) return c.json({ error: "Invalid session" }, 401);
 
-  const config = await get2FAConfig(c.env.DB, userId);
+  const config = await get2FAConfig(c.env.DB, getTablePrefix(c.env), userId);
   if (!config?.passkey_credentials)
     return c.json({ error: "No passkeys registered" }, 400);
 
@@ -373,7 +377,8 @@ auth2faRoutes.post("/passkey/authenticate/verify", async (c) => {
   const userId = await c.env.KV.get(`2fa:${tempToken}`);
   if (!userId) return c.json({ error: "Invalid session" }, 401);
 
-  const config = await get2FAConfig(c.env.DB, userId);
+  const prefix = getTablePrefix(c.env);
+  const config = await get2FAConfig(c.env.DB, prefix, userId);
   if (!config?.passkey_credentials)
     return c.json({ error: "No passkeys" }, 400);
 
@@ -411,14 +416,14 @@ auth2faRoutes.post("/passkey/authenticate/verify", async (c) => {
 
   // Update counter
   credential.counter = verification.authenticationInfo.newCounter;
-  await upsert2FAConfig(c.env.DB, userId, {
+  await upsert2FAConfig(c.env.DB, prefix, userId, {
     passkey_credentials: JSON.stringify(credentials),
   });
 
   await c.env.KV.delete(`2fa:${tempToken}`);
   await c.env.KV.delete(`passkey_auth_challenge:${tempToken}`);
 
-  const user = await findUserById(c.env.DB, userId);
+  const user = await findUserById(c.env.DB, prefix, userId);
   if (!user) return c.json({ error: "User not found" }, 404);
   if (!user.is_active) return c.json({ error: "Account is disabled" }, 403);
   if (user.approval_status !== "approved") {
@@ -494,7 +499,8 @@ auth2faRoutes.delete("/passkey/:credentialId", authMiddleware, async (c) => {
   const userId = c.get("userId");
   const credentialId = c.req.param("credentialId");
 
-  const config = await get2FAConfig(c.env.DB, userId);
+  const prefix = getTablePrefix(c.env);
+  const config = await get2FAConfig(c.env.DB, prefix, userId);
   if (!config?.passkey_credentials)
     return c.json({ error: "No passkeys" }, 400);
 
@@ -504,12 +510,12 @@ auth2faRoutes.delete("/passkey/:credentialId", authMiddleware, async (c) => {
   );
 
   if (filtered.length === 0) {
-    await upsert2FAConfig(c.env.DB, userId, {
+    await upsert2FAConfig(c.env.DB, prefix, userId, {
       passkey_credentials: null,
       passkey_enabled: 0,
     });
   } else {
-    await upsert2FAConfig(c.env.DB, userId, {
+    await upsert2FAConfig(c.env.DB, prefix, userId, {
       passkey_credentials: JSON.stringify(filtered),
     });
   }

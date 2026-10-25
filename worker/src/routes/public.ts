@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../types";
+import { getTablePrefix } from "../types";
 import { countSentLetters, listPublicLetters } from "../db/queries/letters";
 import { sanitizeBodyHtml } from "../services/sanitize";
 
@@ -18,9 +19,10 @@ function maskEmail(email: string | null): string {
 }
 
 publicRoutes.get("/letters", async (c) => {
+  const prefix = getTablePrefix(c.env);
   const [rows, totalSent] = await Promise.all([
-    listPublicLetters(c.env.DB),
-    countSentLetters(c.env.DB),
+    listPublicLetters(c.env.DB, prefix),
+    countSentLetters(c.env.DB, prefix),
   ]);
 
   // 响应可缓存（短 TTL，保证关公开开关后能较快下墙）。

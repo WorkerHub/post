@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { HonoEnv } from "../types";
+import { getTablePrefix } from "../types";
 import { authMiddleware, adminMiddleware } from "../middleware/auth";
 import {
   listUsers,
@@ -25,18 +26,19 @@ const EMAIL_RE =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 adminRoutes.get("/users", async (c) => {
-  const users = await listUsers(c.env.DB);
+  const users = await listUsers(c.env.DB, getTablePrefix(c.env));
   return c.json(users.map(publicUser));
 });
 
 // 批准待批准账号：pending → approved（幂等：已批准直接成功）
 adminRoutes.put("/users/:uid/approve", async (c) => {
   const uid = c.req.param("uid");
-  const user = await findUserById(c.env.DB, uid);
+  const prefix = getTablePrefix(c.env);
+  const user = await findUserById(c.env.DB, prefix, uid);
   if (!user) return c.json({ error: "User not found" }, 404);
 
   if (user.approval_status !== "approved") {
-    await updateUser(c.env.DB, uid, { approval_status: "approved" });
+    await updateUser(c.env.DB, prefix, uid, { approval_status: "approved" });
   }
   return c.json({ success: true });
 });
@@ -57,14 +59,14 @@ adminRoutes.post("/users", async (c) => {
   if (body.password.length < 8)
     return c.json({ error: "Password must be at least 8 characters" }, 400);
 
-  const existing = await findUserByEmail(c.env.DB, email);
+  const existing = await findUserByEmail(c.env.DB, getTablePrefix(c.env), email);
   if (existing) return c.json({ error: "Email already registered" }, 409);
 
   const id = generateId();
   const passwordHash = await hashPassword(body.password);
   const role = body.role === "admin" ? "admin" : "user";
 
-  await createUser(c.env.DB, {
+  await createUser(c.env.DB, getTablePrefix(c.env), {
     id,
     email,
     password_hash: passwordHash,
@@ -72,13 +74,13 @@ adminRoutes.post("/users", async (c) => {
     approval_status: "approved",
   });
 
-  const user = await findUserById(c.env.DB, id);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), id);
   return c.json({ success: true, user: publicUser(user!) }, 201);
 });
 
 adminRoutes.get("/users/:uid", async (c) => {
   const uid = c.req.param("uid");
-  const user = await findUserById(c.env.DB, uid);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), uid);
   if (!user) return c.json({ error: "User not found" }, 404);
   return c.json(publicUser(user));
 });
@@ -86,6 +88,7 @@ adminRoutes.get("/users/:uid", async (c) => {
 // 角色变更 / 禁用启用 / 改邮箱 / 重置密码（照 eNotify PUT /users/:uid；ONE-176 契约同时冻结 PATCH）
 async function updateUserHandler(c: Context<HonoEnv>) {
   const uid = c.req.param("uid")!;
+  const prefix = getTablePrefix(c.env);
   const body = await c.req.json<{
     role?: string;
     is_active?: number | boolean;
@@ -93,7 +96,7 @@ async function updateUserHandler(c: Context<HonoEnv>) {
     password?: string;
   }>();
 
-  const user = await findUserById(c.env.DB, uid);
+  const user = await findUserById(c.env.DB, prefix, uid);
   if (!user) return c.json({ error: "User not found" }, 404);
 
   if (uid === c.get("userId")) {
@@ -115,7 +118,7 @@ async function updateUserHandler(c: Context<HonoEnv>) {
     const newEmail = body.email.trim().toLowerCase();
     if (!EMAIL_RE.test(newEmail))
       return c.json({ error: "Invalid email format" }, 400);
-    const existing = await findUserByEmail(c.env.DB, newEmail);
+    const existing = await findUserByEmail(c.env.DB, prefix, newEmail);
     if (existing && existing.id !== uid)
       return c.json({ error: "Email already in use" }, 409);
     updates.email = newEmail;
@@ -126,7 +129,7 @@ async function updateUserHandler(c: Context<HonoEnv>) {
     updates.password_hash = await hashPassword(body.password);
   }
 
-  await updateUser(c.env.DB, uid, updates);
+  await updateUser(c.env.DB, prefix, uid, updates);
 
   const roleChanged = updates.role !== undefined && updates.role !== user.role;
   const deactivated = updates.is_active === 0 && user.is_active;
@@ -147,10 +150,10 @@ adminRoutes.delete("/users/:uid", async (c) => {
     return c.json({ error: "Cannot delete yourself" }, 400);
   }
 
-  const user = await findUserById(c.env.DB, uid);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), uid);
   if (!user) return c.json({ error: "User not found" }, 404);
 
-  await deleteUser(c.env.DB, uid);
+  await deleteUser(c.env.DB, getTablePrefix(c.env), uid);
   await revokeAllSessions(c.env.KV, uid);
   return c.json({ success: true });
 });

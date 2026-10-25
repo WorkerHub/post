@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import type { HonoEnv, JWTPayload } from "../types";
+import { getTablePrefix } from "../types";
 import { authMiddleware, rateLimit } from "../middleware/auth";
 import { findUserById, updateUser, get2FAConfig } from "../db/queries/users";
 import {
@@ -31,10 +32,11 @@ meRoutes.use(
 
 meRoutes.get("/", async (c) => {
   const userId = c.get("userId");
-  const user = await findUserById(c.env.DB, userId);
+  const prefix = getTablePrefix(c.env);
+  const user = await findUserById(c.env.DB, prefix, userId);
   if (!user) return c.json({ error: "User not found" }, 404);
 
-  const twoFA = await get2FAConfig(c.env.DB, userId);
+  const twoFA = await get2FAConfig(c.env.DB, prefix, userId);
 
   return c.json({
     id: user.id,
@@ -88,7 +90,7 @@ meRoutes.put("/", async (c) => {
     return c.json({ error: "No valid fields to update" }, 400);
   }
 
-  await updateUser(c.env.DB, userId, updates);
+  await updateUser(c.env.DB, getTablePrefix(c.env), userId, updates);
   return c.json({ success: true });
 });
 
@@ -107,14 +109,14 @@ meRoutes.put("/password", async (c) => {
     return c.json({ error: "Password must be at least 8 characters" }, 400);
   }
 
-  const user = await findUserById(c.env.DB, userId);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), userId);
   if (!user) return c.json({ error: "User not found" }, 404);
 
   const valid = await verifyPassword(currentPassword, user.password_hash);
   if (!valid) return c.json({ error: "Current password is incorrect" }, 401);
 
   const hash = await hashPassword(newPassword);
-  await updateUser(c.env.DB, userId, { password_hash: hash });
+  await updateUser(c.env.DB, getTablePrefix(c.env), userId, { password_hash: hash });
 
   // Invalidate current access token
   const accessTokenStr = getCookie(c, "access_token");

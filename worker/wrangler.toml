@@ -16,7 +16,9 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "D1_DATABASE_NAME_PLACEHOLDER"
 database_id = "D1_DATABASE_ID_PLACEHOLDER"
-migrations_dir = "migrations"
+
+# 不再使用 wrangler d1 migrations（ONE-269 冻结契约第 7 条）：
+# 建表统一由 setup/ensureSchema 按生效前缀替换 {prefix} 后执行（对齐 nav runMigrations）。
 
 [[kv_namespaces]]
 binding = "KV"
@@ -26,6 +28,9 @@ id = "KV_NAMESPACE_ID_PLACEHOLDER"
 # 本地开发用 worker/.dev.vars（见 .dev.vars.example，已被 gitignore）；
 # 线上由 CI 经 --secrets-file 上传，唯一可信源为 GitHub repo Secrets（JWT_SECRET / SETUP_SECRET）。
 # 未配置/过短/占位符时 fail-safe：所有 /api/* 一律 500（见 src/index.ts）。
+#
+# 表前缀 TABLE_PREFIX（非 secret，GitHub Variables / Wrangler [vars] 注入，可选）：
+# 未配置 → 默认 "post_"；"" → 显式无前缀；其他值须匹配 /^[a-z0-9_]*$/（不自动补下划线）。
 
 [triggers]
 crons = ["*/5 * * * *"]

@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { HonoEnv, JWTPayload, User } from "../types";
+import { getTablePrefix } from "../types";
 import {
   hashPassword,
   verifyPassword,
@@ -61,11 +62,12 @@ authRoutes.post("/register", async (c) => {
   }
 
   // 首个账号必须走 setup（X-Setup-Secret）创建，开放注册永不产生管理员
-  if ((await countUsers(c.env.DB)) === 0) {
+  const prefix = getTablePrefix(c.env);
+  if ((await countUsers(c.env.DB, prefix)) === 0) {
     return c.json({ error: "Setup required before registration" }, 403);
   }
 
-  const existing = await findUserByEmail(c.env.DB, email);
+  const existing = await findUserByEmail(c.env.DB, prefix, email);
   if (existing) {
     return c.json({ error: "Email already registered" }, 409);
   }
@@ -74,7 +76,7 @@ authRoutes.post("/register", async (c) => {
   const passwordHash = await hashPassword(password);
 
   try {
-    await createUser(c.env.DB, {
+    await createUser(c.env.DB, prefix, {
       id,
       email,
       password_hash: passwordHash,
@@ -111,7 +113,7 @@ authRoutes.post("/login", async (c) => {
     return c.json({ error: "Email and password required" }, 400);
   }
 
-  const user = await findUserByEmail(c.env.DB, email);
+  const user = await findUserByEmail(c.env.DB, getTablePrefix(c.env), email);
   if (!user) {
     // 防时序侧信道：对不存在账号也跑一次哈希（eNotify 同款）
     await verifyPassword(
@@ -135,7 +137,7 @@ authRoutes.post("/login", async (c) => {
     return c.json({ error: "Account pending approval", pending: true }, 403);
   }
 
-  const twoFAConfig = await get2FAConfig(c.env.DB, user.id);
+  const twoFAConfig = await get2FAConfig(c.env.DB, getTablePrefix(c.env), user.id);
   const methods = getAvailable2FAMethods(twoFAConfig);
 
   if (methods.length > 0) {
@@ -212,7 +214,7 @@ authRoutes.post("/refresh", async (c) => {
   await c.env.KV.put(`rt:${payload.jti}`, stored, { expirationTtl: 60 });
   await removeSessionIndex(c.env.KV, payload.sub, payload.jti);
 
-  const user = await findUserById(c.env.DB, payload.sub);
+  const user = await findUserById(c.env.DB, getTablePrefix(c.env), payload.sub);
   if (!user || !user.is_active) {
     return c.json({ error: "User not found or disabled" }, 401);
   }

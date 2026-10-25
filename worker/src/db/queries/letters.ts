@@ -2,6 +2,7 @@ import type { Letter, LetterRecipient } from "../../types";
 
 // letters / letter_recipients 数据访问（SPEC §4/§5）。
 // 归属过滤一律由路由层用 user_id 完成，这里只提供按 id / user_id 的查询原语。
+// 表名一律经显式传入的 prefix（getTablePrefix(env) 结果）拼装，禁止裸表名。
 
 export interface NewLetter {
   id: string;
@@ -42,12 +43,13 @@ const LETTER_UPDATE_COLS = new Set([
 
 export async function listLettersByUser(
   db: D1Database,
+  prefix: string,
   userId: string,
   status?: string,
 ): Promise<Letter[]> {
   const sql = status
-    ? `SELECT * FROM letters WHERE user_id = ? AND status = ? ORDER BY updated_at DESC, id ASC`
-    : `SELECT * FROM letters WHERE user_id = ? ORDER BY updated_at DESC, id ASC`;
+    ? `SELECT * FROM ${prefix}letters WHERE user_id = ? AND status = ? ORDER BY updated_at DESC, id ASC`
+    : `SELECT * FROM ${prefix}letters WHERE user_id = ? ORDER BY updated_at DESC, id ASC`;
   const stmt = status
     ? db.prepare(sql).bind(userId, status)
     : db.prepare(sql).bind(userId);
@@ -57,19 +59,24 @@ export async function listLettersByUser(
 
 export async function getLetterById(
   db: D1Database,
+  prefix: string,
   id: string,
 ): Promise<Letter | null> {
-  return db.prepare(`SELECT * FROM letters WHERE id = ?`).bind(id).first<Letter>();
+  return db
+    .prepare(`SELECT * FROM ${prefix}letters WHERE id = ?`)
+    .bind(id)
+    .first<Letter>();
 }
 
 export async function createLetter(
   db: D1Database,
+  prefix: string,
   data: NewLetter,
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO letters (id, user_id, title, body_html, body_json, send_at, timezone, status, is_public, attempts, last_error, sent_at, created_at, updated_at)
+      `INSERT INTO ${prefix}letters (id, user_id, title, body_html, body_json, send_at, timezone, status, is_public, attempts, last_error, sent_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, 0, NULL, NULL, ?, ?)`,
     )
     .bind(
@@ -89,6 +96,7 @@ export async function createLetter(
 
 export async function updateLetter(
   db: D1Database,
+  prefix: string,
   id: string,
   data: LetterUpdate,
 ): Promise<void> {
@@ -102,16 +110,22 @@ export async function updateLetter(
   const values = entries.map(([, val]) => val);
 
   await db
-    .prepare(`UPDATE letters SET ${setClauses}, updated_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE ${prefix}letters SET ${setClauses}, updated_at = ? WHERE id = ?`,
+    )
     .bind(...values, now, id)
     .run();
 }
 
-export async function deleteLetter(db: D1Database, id: string): Promise<void> {
+export async function deleteLetter(
+  db: D1Database,
+  prefix: string,
+  id: string,
+): Promise<void> {
   // 双重防御：显式清理收件人快照，不依赖 D1 连接的 PRAGMA foreign_keys 级联。
   await db.batch([
-    db.prepare(`DELETE FROM letter_recipients WHERE letter_id = ?`).bind(id),
-    db.prepare(`DELETE FROM letters WHERE id = ?`).bind(id),
+    db.prepare(`DELETE FROM ${prefix}letter_recipients WHERE letter_id = ?`).bind(id),
+    db.prepare(`DELETE FROM ${prefix}letters WHERE id = ?`).bind(id),
   ]);
 }
 
@@ -119,10 +133,13 @@ export async function deleteLetter(db: D1Database, id: string): Promise<void> {
 
 export async function listRecipientsByLetter(
   db: D1Database,
+  prefix: string,
   letterId: string,
 ): Promise<LetterRecipient[]> {
   const result = await db
-    .prepare(`SELECT * FROM letter_recipients WHERE letter_id = ? ORDER BY id ASC`)
+    .prepare(
+      `SELECT * FROM ${prefix}letter_recipients WHERE letter_id = ? ORDER BY id ASC`,
+    )
     .bind(letterId)
     .all<LetterRecipient>();
   return result.results;
@@ -130,10 +147,13 @@ export async function listRecipientsByLetter(
 
 export async function countRecipientsByLetter(
   db: D1Database,
+  prefix: string,
   letterId: string,
 ): Promise<number> {
   const row = await db
-    .prepare(`SELECT COUNT(*) as count FROM letter_recipients WHERE letter_id = ?`)
+    .prepare(
+      `SELECT COUNT(*) as count FROM ${prefix}letter_recipients WHERE letter_id = ?`,
+    )
     .bind(letterId)
     .first<{ count: number }>();
   return row?.count ?? 0;
@@ -142,11 +162,12 @@ export async function countRecipientsByLetter(
 /** 已投递成功的收件人数（>0 表示已部分/全部投递，禁止再重写收件人以防重复投递）。 */
 export async function countSentRecipients(
   db: D1Database,
+  prefix: string,
   letterId: string,
 ): Promise<number> {
   const row = await db
     .prepare(
-      `SELECT COUNT(*) as count FROM letter_recipients WHERE letter_id = ? AND status = 'sent'`,
+      `SELECT COUNT(*) as count FROM ${prefix}letter_recipients WHERE letter_id = ? AND status = 'sent'`,
     )
     .bind(letterId)
     .first<{ count: number }>();
@@ -155,10 +176,11 @@ export async function countSentRecipients(
 
 export async function deleteRecipientsByLetter(
   db: D1Database,
+  prefix: string,
   letterId: string,
 ): Promise<void> {
   await db
-    .prepare(`DELETE FROM letter_recipients WHERE letter_id = ?`)
+    .prepare(`DELETE FROM ${prefix}letter_recipients WHERE letter_id = ?`)
     .bind(letterId)
     .run();
 }
@@ -173,12 +195,13 @@ export interface NewRecipient {
 
 export async function insertRecipient(
   db: D1Database,
+  prefix: string,
   data: NewRecipient,
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
+      `INSERT INTO ${prefix}letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
        VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?)`,
     )
     .bind(data.id, data.letter_id, data.contact_id, data.name, data.email, now)
@@ -188,11 +211,12 @@ export async function insertRecipient(
 /** 手动重发：把失败的收件人重置为 pending（已成功的收件人保留，不重复投递）。 */
 export async function resetFailedRecipientsForResend(
   db: D1Database,
+  prefix: string,
   letterId: string,
 ): Promise<void> {
   await db
     .prepare(
-      `UPDATE letter_recipients SET status = 'pending', error = NULL, sent_at = NULL
+      `UPDATE ${prefix}letter_recipients SET status = 'pending', error = NULL, sent_at = NULL
        WHERE letter_id = ? AND status = 'failed'`,
     )
     .bind(letterId)
@@ -215,14 +239,15 @@ export interface PublicLetterRow {
 
 export async function listPublicLetters(
   db: D1Database,
+  prefix: string,
 ): Promise<PublicLetterRow[]> {
   const result = await db
     .prepare(
       `SELECT l.id, l.title, l.body_html, l.send_at, l.sent_at, l.created_at,
               u.display_name AS author_name,
-              (SELECT r.email FROM letter_recipients r WHERE r.letter_id = l.id ORDER BY r.id ASC LIMIT 1) AS recipient_email
-       FROM letters l
-       JOIN users u ON u.id = l.user_id
+              (SELECT r.email FROM ${prefix}letter_recipients r WHERE r.letter_id = l.id ORDER BY r.id ASC LIMIT 1) AS recipient_email
+       FROM ${prefix}letters l
+       JOIN ${prefix}users u ON u.id = l.user_id
        WHERE l.is_public = 1 AND l.status IN ('scheduled', 'sent')
        ORDER BY COALESCE(l.sent_at, l.send_at) DESC
        LIMIT 100`,
@@ -231,9 +256,14 @@ export async function listPublicLetters(
   return result.results;
 }
 
-export async function countSentLetters(db: D1Database): Promise<number> {
+export async function countSentLetters(
+  db: D1Database,
+  prefix: string,
+): Promise<number> {
   const row = await db
-    .prepare(`SELECT COUNT(*) as count FROM letters WHERE status = 'sent'`)
+    .prepare(
+      `SELECT COUNT(*) as count FROM ${prefix}letters WHERE status = 'sent'`,
+    )
     .first<{ count: number }>();
   return row?.count ?? 0;
 }

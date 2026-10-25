@@ -1,6 +1,7 @@
 import type { Contact } from "../../types";
 
 // contacts 数据访问（SPEC §7）。归属过滤由路由层用 user_id 完成。
+// 表名一律经显式传入的 prefix（getTablePrefix(env) 结果）拼装，禁止裸表名。
 
 export interface NewContact {
   id: string;
@@ -15,11 +16,12 @@ const CONTACT_UPDATE_COLS = new Set(["name", "email", "notes", "tags"]);
 
 export async function listContactsByUser(
   db: D1Database,
+  prefix: string,
   userId: string,
 ): Promise<Contact[]> {
   const result = await db
     .prepare(
-      `SELECT * FROM contacts WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC, id ASC`,
+      `SELECT * FROM ${prefix}contacts WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC, id ASC`,
     )
     .bind(userId)
     .all<Contact>();
@@ -28,22 +30,24 @@ export async function listContactsByUser(
 
 export async function getContactById(
   db: D1Database,
+  prefix: string,
   id: string,
 ): Promise<Contact | null> {
   return db
-    .prepare(`SELECT * FROM contacts WHERE id = ?`)
+    .prepare(`SELECT * FROM ${prefix}contacts WHERE id = ?`)
     .bind(id)
     .first<Contact>();
 }
 
 export async function findContactByUserEmail(
   db: D1Database,
+  prefix: string,
   userId: string,
   email: string,
 ): Promise<Contact | null> {
   return db
     .prepare(
-      `SELECT * FROM contacts WHERE user_id = ? AND email = ? COLLATE NOCASE`,
+      `SELECT * FROM ${prefix}contacts WHERE user_id = ? AND email = ? COLLATE NOCASE`,
     )
     .bind(userId, email.trim().toLowerCase())
     .first<Contact>();
@@ -51,12 +55,13 @@ export async function findContactByUserEmail(
 
 export async function createContact(
   db: D1Database,
+  prefix: string,
   data: NewContact,
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO contacts (id, user_id, name, email, notes, tags, created_at, updated_at)
+      `INSERT INTO ${prefix}contacts (id, user_id, name, email, notes, tags, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(data.id, data.user_id, data.name, data.email, data.notes, data.tags, now, now)
@@ -65,6 +70,7 @@ export async function createContact(
 
 export async function updateContact(
   db: D1Database,
+  prefix: string,
   id: string,
   data: Partial<Pick<Contact, "name" | "email" | "notes" | "tags">>,
 ): Promise<void> {
@@ -78,11 +84,17 @@ export async function updateContact(
   const values = entries.map(([, val]) => val);
 
   await db
-    .prepare(`UPDATE contacts SET ${setClauses}, updated_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE ${prefix}contacts SET ${setClauses}, updated_at = ? WHERE id = ?`,
+    )
     .bind(...values, now, id)
     .run();
 }
 
-export async function deleteContact(db: D1Database, id: string): Promise<void> {
-  await db.prepare(`DELETE FROM contacts WHERE id = ?`).bind(id).run();
+export async function deleteContact(
+  db: D1Database,
+  prefix: string,
+  id: string,
+): Promise<void> {
+  await db.prepare(`DELETE FROM ${prefix}contacts WHERE id = ?`).bind(id).run();
 }
