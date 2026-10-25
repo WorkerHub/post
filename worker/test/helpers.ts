@@ -98,9 +98,9 @@ export class MockKV {
 export class SqliteD1 {
   readonly db: DatabaseSync;
 
-  constructor(schema: string = SCHEMA_SQL) {
+  constructor(schema: string = SCHEMA_SQL, enableForeignKeys = true) {
     this.db = new DatabaseSync(":memory:");
-    this.db.exec("PRAGMA foreign_keys = ON");
+    if (enableForeignKeys) this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(schema);
   }
 
