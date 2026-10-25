@@ -7,6 +7,7 @@ import { MOCK_SETUP_SECRET, resetMockStore, seedFreshDeployment, state } from "@
 import { toMeProfile } from "@/api/mock/store";
 import type { MeProfile } from "@/api/settings";
 import { useAuthStore } from "@/store/auth";
+import { useRegistrationStore } from "@/store/registration";
 import { useSetupStore } from "@/store/setup";
 import LoginPage from "./login";
 import RegisterPage from "./register";
@@ -39,12 +40,14 @@ beforeEach(() => {
   resetMockStore();
   useAuthStore.setState({ isAuthenticated: false, user: null });
   useSetupStore.setState({ enabled: null });
+  useRegistrationStore.setState({ enabled: null });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   useAuthStore.setState({ isAuthenticated: false, user: null });
   useSetupStore.setState({ enabled: null });
+  useRegistrationStore.setState({ enabled: null });
 });
 
 /**
@@ -293,5 +296,32 @@ describe("注册页 · 首个账号成为管理员（ONE-314）", () => {
       role: "user",
       approval_status: "pending",
     });
+  });
+});
+
+// 登录页注册入口门控（ONE-336）：注册关闭时隐藏「注册」入口，开启 / 状态未知时保留。
+describe("登录页 · 注册入口门控（ONE-336）", () => {
+  it("注册开启：显示「注册」入口", () => {
+    useRegistrationStore.setState({ enabled: true });
+    renderLogin();
+
+    expect(screen.getByRole("link", { name: "注册" })).toHaveAttribute("href", "/register");
+  });
+
+  it("状态未取得（null）：不误隐藏入口", () => {
+    renderLogin();
+
+    expect(useRegistrationStore.getState().enabled).toBeNull();
+    expect(screen.getByRole("link", { name: "注册" })).toBeInTheDocument();
+  });
+
+  it("注册关闭：隐藏「注册」入口，登录表单照常可用", () => {
+    useRegistrationStore.setState({ enabled: false });
+    renderLogin();
+
+    expect(screen.queryByRole("link", { name: "注册" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/还没有账号/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 });

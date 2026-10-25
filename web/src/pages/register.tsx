@@ -6,13 +6,18 @@ import { authApi } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/store/auth";
+import { useRegistrationStore } from "@/store/registration";
 import { useSetupStore } from "@/store/setup";
 
 // 注册页（ONE-314）：setup 未初始化时注册必被后端 403，这里直接引导到 /setup；
 // setup 关闭后首个注册账号是管理员，其余账号待管理员批准。
+// ONE-336：管理员关闭注册后（GET /api/auth/registration-state 返回 enabled=false）
+// 不渲染表单，只展示「注册已关闭」；状态未取得（null，如接口失败）时不关门——
+// 后端 POST /api/auth/register 才是最终裁决，不因前端读不到状态把注册入口误关。
 export default function RegisterPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setupEnabled = useSetupStore((s) => s.enabled);
+  const registrationEnabled = useRegistrationStore((s) => s.enabled);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,6 +35,35 @@ export default function RegisterPage() {
   // 未初始化：注册入口一律让位给初始化页
   if (setupEnabled === true) {
     return <Navigate to="/setup" replace />;
+  }
+
+  // 注册开关关闭：不渲染表单，只留一句「已关闭」和回登录 / 公开墙的去处
+  if (registrationEnabled === false) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center px-4 py-10">
+        <div className="w-full max-w-sm rounded-[6px] border border-paper-300 bg-paper-50 p-8 shadow-[0_1px_3px_rgba(58,53,42,0.08)]">
+          <div className="flex items-center gap-2">
+            <Mail className="size-5 text-seal-500" />
+            <h1 className="font-serif text-xl font-semibold">注册时光邮局</h1>
+          </div>
+
+          <p className="mt-6 rounded-md border border-paper-300 bg-paper-100 px-3 py-2 text-sm text-ink-700">
+            注册已关闭，暂不接受新用户注册
+          </p>
+
+          <Button asChild className="mt-6 w-full">
+            <Link to="/login">返回登录</Link>
+          </Button>
+
+          <p className="mt-8 text-center text-xs text-ink-500">
+            <Link to="/" className="inline-flex items-center gap-1 hover:underline">
+              <ArrowLeft className="size-3.5" />
+              返回公开信墙
+            </Link>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const submit = async () => {
