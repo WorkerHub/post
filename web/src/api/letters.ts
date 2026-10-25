@@ -11,6 +11,16 @@ export type LetterStatus =
   | "failed"
   | "cancelled";
 
+/** 状态中文标签（工作台/写信页共用）。 */
+export const LETTER_STATUS_LABEL: Record<LetterStatus, string> = {
+  draft: "草稿",
+  scheduled: "待寄出",
+  sending: "发送中",
+  sent: "已寄出",
+  failed: "失败",
+  cancelled: "已取消",
+};
+
 /** 收件人快照：contact_id 指向联系人（可空），name/email 为保存时快照。 */
 export interface LetterRecipient {
   contact_id: string | null;
@@ -31,10 +41,19 @@ export interface LetterPayload {
   recipients: LetterRecipient[];
 }
 
-/** 后端返回的完整信件（编辑回填时读取 recipients）。 */
+/** PATCH /api/letters/:id 的部分字段更新（is_public 开关等）。 */
+export interface LetterPatch {
+  is_public?: boolean;
+}
+
+/** 后端返回的完整信件（编辑回填时读取 recipients；失败视图读取 last_error/attempts）。 */
 export interface Letter extends LetterPayload {
   id: string;
   status: LetterStatus;
+  /** 已尝试投递次数；重发时归零由用户确认。 */
+  attempts: number;
+  /** 失败原因汇总（status=failed 时可见）。 */
+  last_error: string | null;
   sent_at: string | null;
   created_at: string;
   updated_at: string;
@@ -45,8 +64,11 @@ export interface LettersApi {
   get(id: string): Promise<Letter>;
   create(payload: LetterPayload): Promise<Letter>;
   update(id: string, payload: LetterPayload): Promise<Letter>;
+  patch(id: string, patch: LetterPatch): Promise<Letter>;
   schedule(id: string): Promise<Letter>;
   cancel(id: string): Promise<Letter>;
+  /** 失败重发：回 scheduled，attempts 归零。 */
+  resend(id: string): Promise<Letter>;
   remove(id: string): Promise<void>;
 }
 
@@ -91,6 +113,15 @@ export const httpLettersApi: LettersApi = {
     if (!res.ok) throw await parseError(res);
     return (await res.json()) as Letter;
   },
+  async patch(id, patch) {
+    const res = await fetch(`/api/letters/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw await parseError(res);
+    return (await res.json()) as Letter;
+  },
   async schedule(id) {
     const res = await fetch(`/api/letters/${id}/schedule`, { method: "POST" });
     if (!res.ok) throw await parseError(res);
@@ -98,6 +129,11 @@ export const httpLettersApi: LettersApi = {
   },
   async cancel(id) {
     const res = await fetch(`/api/letters/${id}/cancel`, { method: "POST" });
+    if (!res.ok) throw await parseError(res);
+    return (await res.json()) as Letter;
+  },
+  async resend(id) {
+    const res = await fetch(`/api/letters/${id}/resend`, { method: "POST" });
     if (!res.ok) throw await parseError(res);
     return (await res.json()) as Letter;
   },

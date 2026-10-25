@@ -46,3 +46,24 @@ export function isAfterNow(localInputValue: string, now: Date = new Date()): boo
   if (Number.isNaN(t)) return false;
   return t > now.getTime();
 }
+
+/** IANA 时区列表（供设置页下拉选择）：优先取运行时支持值，失败退回常用子集。 */
+export function getTimezones(): string[] {
+  try {
+    const tz = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    if (tz) return tz("timeZone");
+  } catch {
+    // 旧环境不支持，退回到静态列表
+  }
+  return [
+    "Asia/Shanghai",
+    "Asia/Hong_Kong",
+    "Asia/Tokyo",
+    "Asia/Singapore",
+    "Europe/London",
+    "Europe/Paris",
+    "America/New_York",
+    "America/Los_Angeles",
+    "UTC",
+  ];
+}
