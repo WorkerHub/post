@@ -7,6 +7,10 @@ import { authRoutes } from "./routes/auth";
 import { auth2faRoutes } from "./routes/auth2fa";
 import { meRoutes } from "./routes/me";
 import { adminRoutes } from "./routes/admin";
+import { lettersRoutes } from "./routes/letters";
+import { contactsRoutes } from "./routes/contacts";
+import { publicRoutes } from "./routes/public";
+import { adminSmtpRoutes } from "./routes/admin-smtp";
 import { processDueLetters } from "./services/scheduler";
 
 export const app = new Hono<HonoEnv>();
@@ -48,6 +52,12 @@ app.route("/api/setup", setupRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api/auth/2fa", auth2faRoutes);
 app.route("/api/me", meRoutes);
+// 冻结契约（ONE-176）设置路由：与 /api/me 同源，昵称/时区/语言/会话。
+app.route("/api/settings/me", meRoutes);
+app.route("/api/letters", lettersRoutes);
+app.route("/api/contacts", contactsRoutes);
+app.route("/api/public", publicRoutes);
+app.route("/api/admin/settings", adminSmtpRoutes);
 app.route("/api/admin", adminRoutes);
 
 app.get("/api/health", (c) =>

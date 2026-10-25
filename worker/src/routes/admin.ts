@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { HonoEnv } from "../types";
 import { authMiddleware, adminMiddleware } from "../middleware/auth";
 import {
@@ -83,9 +83,9 @@ adminRoutes.get("/users/:uid", async (c) => {
   return c.json(publicUser(user));
 });
 
-// 角色变更 / 禁用启用 / 改邮箱 / 重置密码（照 eNotify PUT /users/:uid）
-adminRoutes.put("/users/:uid", async (c) => {
-  const uid = c.req.param("uid");
+// 角色变更 / 禁用启用 / 改邮箱 / 重置密码（照 eNotify PUT /users/:uid；ONE-176 契约同时冻结 PATCH）
+async function updateUserHandler(c: Context<HonoEnv>) {
+  const uid = c.req.param("uid")!;
   const body = await c.req.json<{
     role?: string;
     is_active?: number | boolean;
@@ -134,7 +134,11 @@ adminRoutes.put("/users/:uid", async (c) => {
     await revokeAllSessions(c.env.KV, uid);
   }
   return c.json({ success: true });
-});
+}
+
+// ONE-176 冻结契约：GET/PATCH /api/admin/users/:id；PUT（stage 2 已冻结）继续可用。
+adminRoutes.put("/users/:uid", updateUserHandler);
+adminRoutes.patch("/users/:uid", updateUserHandler);
 
 adminRoutes.delete("/users/:uid", async (c) => {
   const uid = c.req.param("uid");
