@@ -30,7 +30,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm build:web
+      - name: Build web
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: pnpm build:web
 
       - name: Patch wrangler.toml
         working-directory: worker
