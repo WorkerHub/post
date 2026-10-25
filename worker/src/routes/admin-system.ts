@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../types";
 import { authMiddleware, adminMiddleware } from "../middleware/auth";
-import { runSchema } from "./setup";
+import {
+  firstMigrationError,
+  runMigrations,
+  TablePrefixConflictError,
+  toSchemaReport,
+  type RunMigrationsResult,
+} from "../lib/migrations-runner";
 import { isSetupPageEnabled, setSetupPageEnabled } from "../lib/setup";
 import {
   isRegistrationEnabled,
@@ -19,11 +25,33 @@ export const adminSystemRoutes = new Hono<HonoEnv>();
 adminSystemRoutes.use("*", authMiddleware);
 adminSystemRoutes.use("*", adminMiddleware);
 
-// 升级数据库：跑既有 ensureSchema（CREATE TABLE/INDEX IF NOT EXISTS，幂等），不用 SETUP_SECRET、不改数据。
+// 升级数据库：跑与 POST /api/setup 同一个迁移 runner（账本保证只跑未应用的迁移），
+// 不用 SETUP_SECRET、不删不改存量数据。
 adminSystemRoutes.post("/db-upgrade", async (c) => {
-  const report = await runSchema(c.env);
+  let result: RunMigrationsResult;
+  try {
+    result = await runMigrations(c.env);
+  } catch (err) {
+    if (err instanceof TablePrefixConflictError) {
+      return c.json({ error: err.message }, 409);
+    }
+    throw err;
+  }
+
+  const report = toSchemaReport(result);
+  const failed = firstMigrationError(result);
+  if (failed) {
+    console.error(
+      `[admin] db-upgrade failed at ${failed.name}: ${failed.error}`,
+    );
+    return c.json(
+      { success: false, error: `Migration failed: ${failed.name}`, ...report },
+      500,
+    );
+  }
+
   console.log(
-    `[admin] db-upgrade ok: table prefix "${report.table_prefix}", ${report.statements} statements`,
+    `[admin] db-upgrade ok: table prefix "${report.table_prefix}", applied ${report.applied}, skipped ${report.skipped}`,
   );
   return c.json({ success: true, ...report });
 });

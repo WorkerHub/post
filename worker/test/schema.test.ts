@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { SCHEMA_SQL } from "../src/db/schema";
+import { getMigrations } from "../src/db/migrations";
 import {
   DEFAULT_TABLE_PREFIX,
   getTablePrefix,
@@ -8,9 +8,16 @@ import {
   tables,
   type Env,
 } from "../src/types";
-import { ensureSchema } from "../src/routes/setup";
+import { runMigrations } from "../src/lib/migrations-runner";
 import { countUsers } from "../src/db/queries/users";
 import { SqliteD1 } from "./helpers";
+
+/** schema_v1 的 SQL（按生效前缀替换后）——塌缩后只有这一条迁移。 */
+function schemaSql(prefix: string): string {
+  return getMigrations(prefix)
+    .map((m) => m.sql)
+    .join("\n");
+}
 
 describe("表前缀三态（ONE-269 冻结契约）", () => {
   it("默认前缀常量是唯一允许写死的表名常量", () => {
@@ -65,25 +72,32 @@ describe("tables(env)", () => {
   });
 });
 
-describe("SCHEMA_SQL（{prefix} 占位）", () => {
+describe("schema_v1 迁移（历史塌缩后的最终 schema）", () => {
   function freshDb(prefix: string) {
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SCHEMA_SQL.replace(/\{prefix\}/g, prefix));
+    db.exec(schemaSql(prefix));
     return db;
   }
 
-  it("不含裸表名（表/索引名均为 {prefix} 占位）", () => {
-    expect(SCHEMA_SQL).not.toMatch(
-      /CREATE TABLE IF NOT EXISTS (users|user_2fa|letters|letter_recipients|contacts|system_settings)[ (]/,
-    );
-    expect(SCHEMA_SQL).not.toMatch(/REFERENCES (users|letters)\(/);
-    expect(SCHEMA_SQL).toContain("{prefix}users");
-    expect(SCHEMA_SQL).toContain("{prefix}letters");
-    expect(SCHEMA_SQL).toContain("idx_{prefix}letters_status_send_at");
+  it("迁移列表以 schema_v1 开头，且不再有 {prefix} 占位符残留", () => {
+    const migrations = getMigrations("post_");
+    expect(migrations[0]?.name).toBe("schema_v1");
+    expect(migrations[0]?.sql).not.toContain("{prefix}");
   });
 
-  it("替换 {prefix} 后建出带前缀的表与索引", () => {
+  it("按生效前缀参数化表名（不含裸表名）", () => {
+    const sql = schemaSql("post_");
+    expect(sql).not.toMatch(
+      /CREATE TABLE IF NOT EXISTS (users|user_2fa|letters|letter_recipients|contacts|system_settings)[ (]/,
+    );
+    expect(sql).not.toMatch(/REFERENCES (users|letters)\(/);
+    expect(sql).toContain("post_users");
+    expect(sql).toContain("post_letters");
+    expect(sql).toContain("idx_post_letters_status_send_at");
+  });
+
+  it("替换前缀后建出带前缀的表与索引", () => {
     const db = freshDb("post_");
     const names = (type: string, onlyIdx = false) =>
       db
@@ -111,9 +125,7 @@ describe("SCHEMA_SQL（{prefix} 占位）", () => {
 
   it("幂等（CREATE IF NOT EXISTS 可重复执行）", () => {
     const db = freshDb("post_");
-    expect(() =>
-      db.exec(SCHEMA_SQL.replace(/\{prefix\}/g, "post_")),
-    ).not.toThrow();
+    expect(() => db.exec(schemaSql("post_"))).not.toThrow();
   });
 
   it("外键级联与 CHECK 约束在带前缀建表下仍生效", () => {
@@ -131,7 +143,7 @@ describe("SCHEMA_SQL（{prefix} 占位）", () => {
   });
 });
 
-describe("ensureSchema 建表与查询表名一致性", () => {
+describe("迁移建出的表名与 queries 引用的表名一致", () => {
   function emptyEnv(prefix?: string) {
     const db = new SqliteD1("");
     return {
@@ -142,8 +154,9 @@ describe("ensureSchema 建表与查询表名一致性", () => {
 
   it("按生效前缀建表，返回实际生效前缀", async () => {
     const env = emptyEnv("kp_");
-    const prefix = await ensureSchema(env);
-    expect(prefix).toBe("kp_");
+    const result = await runMigrations(env);
+    expect(result.prefix).toBe("kp_");
+    expect(result.migrations).toEqual([{ name: "schema_v1", status: "applied" }]);
 
     const created = (env.DB as unknown as SqliteD1).db
       .prepare("SELECT name FROM sqlite_master WHERE type='table'")
@@ -155,9 +168,9 @@ describe("ensureSchema 建表与查询表名一致性", () => {
     expect(created).not.toContain("users");
   });
 
-  it("ensureSchema 建出的表名 === queries 实际引用的表名", async () => {
+  it("迁移建出的表名 === queries 实际引用的表名", async () => {
     const env = emptyEnv("x_");
-    const prefix = await ensureSchema(env);
+    const prefix = (await runMigrations(env)).prefix;
 
     // queries 与建表共用同一 prefix 解析：表存在则查询成功，表名不一致会抛错。
     await expect(countUsers(env.DB, prefix)).resolves.toBe(0);

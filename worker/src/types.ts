@@ -135,15 +135,41 @@ export function getTablePrefix(env: Pick<Env, "TABLE_PREFIX">): string {
   return raw;
 }
 
+/**
+ * 前缀核：业务表前缀去掉尾部下划线（`post_` → `post`，`""` → `""`）。
+ * 大小写原值保留，不做任何规范化——表名一旦落库即固定。
+ */
+export function prefixCore(prefix: string): string {
+  return prefix.endsWith("_")
+    ? prefix.slice(0, prefix.length - 1)
+    : prefix;
+}
+
+/** 业务表名：前缀 + 表名（前缀自带尾部 `_`，见三态解析）。 */
+export function tbl(prefix: string, name: string): string {
+  return `${prefix}${name}`;
+}
+
+/**
+ * 迁移账本表名（ONE-347 冻结契约）：`_` + 前缀核 + `_schema_migrations`，
+ * 空前缀时为 `_schema_migrations`（例：`post_` → `_post_schema_migrations`）。
+ *
+ * 这是**唯一**允许生成账本表名的入口：严禁在任何地方散落拼接 `_${prefix}_schema_migrations`。
+ */
+export function migrationsTable(prefix: string): string {
+  const core = prefixCore(prefix);
+  return core === "" ? "_schema_migrations" : `_${core}_schema_migrations`;
+}
+
 /** 6 张表的解析后表名（对齐 Zeta tables(env) 形态），内部复用三态解析。 */
 export function tables(env: Pick<Env, "TABLE_PREFIX">) {
   const p = getTablePrefix(env);
   return {
-    users: `${p}users`,
-    user_2fa: `${p}user_2fa`,
-    letters: `${p}letters`,
-    letter_recipients: `${p}letter_recipients`,
-    contacts: `${p}contacts`,
-    system_settings: `${p}system_settings`,
+    users: tbl(p, "users"),
+    user_2fa: tbl(p, "user_2fa"),
+    letters: tbl(p, "letters"),
+    letter_recipients: tbl(p, "letter_recipients"),
+    contacts: tbl(p, "contacts"),
+    system_settings: tbl(p, "system_settings"),
   };
 }

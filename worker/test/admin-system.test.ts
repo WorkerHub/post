@@ -50,7 +50,7 @@ describe("POST /api/admin/db-upgrade（ONE-319：免 SETUP_SECRET 升级数据�
     expect(forbidden.body.success).toBeUndefined();
   });
 
-  it("管理员可调用，返回 {success:true} 与执行摘要", async () => {
+  it("管理员可调用，返回 {success:true} 与迁移摘要（ONE-347 账本口径）", async () => {
     const { env, admin } = await adminEnv();
     const { status, body } = await request(env, "/api/admin/db-upgrade", {
       method: "POST",
@@ -59,7 +59,10 @@ describe("POST /api/admin/db-upgrade（ONE-319：免 SETUP_SECRET 升级数据�
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.table_prefix).toBe("post_");
-    expect(body.statements).toBeGreaterThan(0);
+    // 已初始化过的库（账本已记 schema_v1）→ 本次全部 skipped
+    expect(body.applied).toBe(0);
+    expect(body.skipped).toBe(1);
+    expect(body.migrations).toEqual([{ name: "schema_v1", status: "skipped" }]);
   });
 
   it("幂等：重复调用结果一致，且不破坏既有数据与设置", async () => {
