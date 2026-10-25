@@ -1,9 +1,8 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import { settingsApi } from "@/api/client";
 import { RequireAuth } from "@/components/require-auth";
-import { useAuthStore } from "@/store/auth";
+import { SessionBootstrap } from "@/components/session-bootstrap";
 import ContactsPage from "@/pages/contacts";
 import LettersPage from "@/pages/letters";
 import LoginPage from "@/pages/login";
@@ -14,27 +13,6 @@ import SettingsPage from "@/pages/settings";
 // 写信页按需加载：TipTap/ProseMirror 体积较大，仅访问 /compose 时才拉取，
 // 避免公开信墙等首屏页面背负编辑器依赖。
 const ComposePage = lazy(() => import("@/pages/compose"));
-
-// 会话自举：HttpOnly Cookie 无法被 JS 读取，靠 GET /api/me 判定登录态。
-// 成功则写入用户档案（含 role），失败（401）则保持未登录。
-function SessionBootstrap() {
-  const setUser = useAuthStore((s) => s.setUser);
-  useEffect(() => {
-    let cancelled = false;
-    settingsApi
-      .fetchMe()
-      .then((user) => {
-        if (!cancelled) setUser(user);
-      })
-      .catch(() => {
-        // 未登录 / 会话过期：保持未登录态
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [setUser]);
-  return null;
-}
 
 // 路由骨架（SPEC §9）：
 // - `/` 未登录为公开信墙；登录态由 PublicWallPage 分流重定向到 `/letters` 工作台。

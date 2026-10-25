@@ -61,6 +61,7 @@ export function UsersSection({ currentUserId }: { currentUserId: string }) {
             {error}
           </p>
         )}
+        <div className="max-h-96 space-y-3 overflow-y-auto pr-1">
         {users.map((u) => {
           const isSelf = u.id === currentUserId;
           const busy = busyId === u.id;
@@ -152,6 +153,7 @@ export function UsersSection({ currentUserId }: { currentUserId: string }) {
             </div>
           );
         })}
+        </div>
       </CardContent>
     </Card>
   );

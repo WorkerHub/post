@@ -1,18 +1,26 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { ArrowLeft, Mail } from "lucide-react";
 
 import { authApi } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuthStore } from "@/store/auth";
 
 export default function RegisterPage() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+
+  // 已登录访问注册页 → 直接去工作台
+  if (isAuthenticated) {
+    return <Navigate to="/letters" replace />;
+  }
 
   const submit = async () => {
     setError(null);

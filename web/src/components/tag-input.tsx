@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -6,19 +5,27 @@ import { Input } from "@/components/ui/input";
 export interface TagInputProps {
   tags: string[];
   onChange: (tags: string[]) => void;
+  /** 草稿文本提升到父级：submit 时父级可统一合并草稿，避免「点保存丢失未回车标签」。 */
+  draft: string;
+  onDraftChange: (draft: string) => void;
   placeholder?: string;
   inputId?: string;
 }
 
 /** 多标签输入：回车新建标签，点击 × 移除（SPEC §7「tags 多标签可输入新建」）。 */
-export function TagInput({ tags, onChange, placeholder, inputId }: TagInputProps) {
-  const [draft, setDraft] = useState("");
-
+export function TagInput({
+  tags,
+  onChange,
+  draft,
+  onDraftChange,
+  placeholder,
+  inputId,
+}: TagInputProps) {
   const add = () => {
     const value = draft.trim();
     if (!value) return;
     if (!tags.includes(value)) onChange([...tags, value]);
-    setDraft("");
+    onDraftChange("");
   };
 
   const remove = (tag: string) => {
@@ -50,14 +57,13 @@ export function TagInput({ tags, onChange, placeholder, inputId }: TagInputProps
       <Input
         id={inputId}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => onDraftChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             add();
           }
         }}
-        onBlur={add}
         placeholder={placeholder ?? "输入标签后回车"}
       />
     </div>

@@ -89,12 +89,18 @@ function LetterCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <Link
-                to={`/compose/${letter.id}`}
-                className="font-serif text-base font-semibold text-ink-900 hover:text-seal-600 hover:underline"
-              >
-                {letter.title || "（无标题）"}
-              </Link>
+              {editable ? (
+                <Link
+                  to={`/compose/${letter.id}`}
+                  className="font-serif text-base font-semibold text-ink-900 hover:text-seal-600 hover:underline"
+                >
+                  {letter.title || "（无标题）"}
+                </Link>
+              ) : (
+                <span className="font-serif text-base font-semibold text-ink-900">
+                  {letter.title || "（无标题）"}
+                </span>
+              )}
               <Badge className={statusBadgeClass(letter.status)}>
                 {LETTER_STATUS_LABEL[letter.status]}
               </Badge>

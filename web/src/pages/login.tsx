@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { ArrowLeft, KeyRound, Mail, ShieldCheck } from "lucide-react";
@@ -15,6 +15,7 @@ type Step = "credentials" | "twofa";
 export default function LoginPage() {
   const navigate = useNavigate();
   const setUser = useAuthStore((s) => s.setUser);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
@@ -24,6 +25,12 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 已登录访问登录页 → 直接去工作台（避免卡死在 /login）
+  if (isAuthenticated) {
+    return <Navigate to="/letters" replace />;
+  }
+
 
   const finish = (user: MeProfile) => {
     setUser(user);

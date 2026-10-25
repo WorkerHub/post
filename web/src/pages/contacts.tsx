@@ -36,6 +36,7 @@ function ContactFormDialog({
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +47,7 @@ function ContactFormDialog({
       setEmail(contact?.email ?? "");
       setNotes(contact?.notes ?? "");
       setTags(contact?.tags ?? []);
+      setTagDraft("");
       setError(null);
     }
   }, [open, contact]);
@@ -61,11 +63,15 @@ function ContactFormDialog({
       setError("邮箱格式不正确");
       return;
     }
+    // 提交时合并 TagInput 内未回车确认的草稿，避免丢失
+    const draftTag = tagDraft.trim();
+    const finalTags =
+      draftTag && !tags.includes(draftTag) ? [...tags, draftTag] : tags;
     const payload: ContactPayload = {
       name: name.trim(),
       email: normalizedEmail,
       notes: notes.trim(),
-      tags,
+      tags: finalTags,
     };
     setSaving(true);
     try {
@@ -129,7 +135,13 @@ function ContactFormDialog({
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-ink-700">标签</label>
-            <TagInput tags={tags} onChange={setTags} placeholder="输入标签后回车" />
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              draft={tagDraft}
+              onDraftChange={setTagDraft}
+              placeholder="输入标签后回车"
+            />
           </div>
           {error && (
             <p role="alert" className="rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">

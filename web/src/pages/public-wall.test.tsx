@@ -62,6 +62,7 @@ function renderApp(initial = "/", authed = false, displayName: string | null = n
   useAuthStore.setState({
     isAuthenticated: authed,
     user: authed ? mockUser(displayName) : null,
+    isLoading: false,
   });
   return render(
     <MemoryRouter initialEntries={[initial]}>
@@ -83,7 +84,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useAuthStore.setState({ isAuthenticated: false, user: null });
+  useAuthStore.setState({ isAuthenticated: false, user: null, isLoading: false });
 });
 
 describe("公开信墙渲染状态族（先等数据加载完成再断言）", () => {
