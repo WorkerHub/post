@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { tables } from "../src/types";
 import {
   cookieHeader,
   doSetup,
@@ -33,8 +34,9 @@ async function seedLetter(
   },
 ) {
   const now = new Date().toISOString();
+  const T = tables(env);
   await env.DB.prepare(
-    `INSERT INTO letters (id, user_id, title, body_html, body_json, send_at, timezone, status, is_public, attempts, last_error, sent_at, created_at, updated_at)
+    `INSERT INTO ${T.letters} (id, user_id, title, body_html, body_json, send_at, timezone, status, is_public, attempts, last_error, sent_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, '', ?, 'Asia/Shanghai', ?, ?, 0, NULL, ?, ?, ?)`,
   )
     .bind(
@@ -51,7 +53,7 @@ async function seedLetter(
     )
     .run();
   await env.DB.prepare(
-    `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
+    `INSERT INTO ${T.letter_recipients} (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
      VALUES (?, ?, NULL, '', ?, 'pending', NULL, NULL, ?)`,
   )
     .bind(`r-${overrides.id}`, overrides.id, overrides.email ?? "recipient@example.com", now)
@@ -62,7 +64,7 @@ describe("公开信墙 API（ONE-176）", () => {
   it("未登录可达，只含 is_public=1（scheduled/sent），私有数据零出现", async () => {
     const { env, user } = await setupWithUser();
     const uid = (
-      await env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+      await env.DB.prepare(`SELECT id FROM ${tables(env).users} WHERE email = ?`)
         .bind("alice@example.com")
         .first<{ id: string }>()
     )!.id;
@@ -134,7 +136,7 @@ describe("公开信墙 API（ONE-176）", () => {
   it("展示时 body_html 再过白名单消毒，且响应可缓存", async () => {
     const { env, user } = await setupWithUser();
     const uid = (
-      await env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+      await env.DB.prepare(`SELECT id FROM ${tables(env).users} WHERE email = ?`)
         .bind("alice@example.com")
         .first<{ id: string }>()
     )!.id;
@@ -164,11 +166,11 @@ describe("公开信墙 API（ONE-176）", () => {
   it("昵称作为发信人显示名", async () => {
     const { env, user } = await setupWithUser();
     const uid = (
-      await env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+      await env.DB.prepare(`SELECT id FROM ${tables(env).users} WHERE email = ?`)
         .bind("alice@example.com")
         .first<{ id: string }>()
     )!.id;
-    await env.DB.prepare(`UPDATE users SET display_name = ? WHERE id = ?`)
+    await env.DB.prepare(`UPDATE ${tables(env).users} SET display_name = ? WHERE id = ?`)
       .bind("小满", uid)
       .run();
 

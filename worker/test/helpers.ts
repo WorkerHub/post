@@ -1,16 +1,24 @@
 import { DatabaseSync } from "node:sqlite";
 import { app } from "../src/index";
 import { SCHEMA_SQL } from "../src/db/schema";
-import type { Env } from "../src/types";
+import { getTablePrefix, type Env } from "../src/types";
 
 export const TEST_JWT_SECRET = "test-jwt-secret-0123456789abcdef";
 export const TEST_SETUP_SECRET = "test-setup-secret";
 
 export type TestEnv = Record<string, unknown>;
 
+/** 按 TABLE_PREFIX 解析生效前缀并替换 {prefix}（与运行时 ensureSchema 一致）。 */
+export function resolveSchema(env: Pick<Env, "TABLE_PREFIX">): string {
+  return SCHEMA_SQL.replace(/\{prefix\}/g, getTablePrefix(env));
+}
+
 export function makeEnv(overrides: TestEnv = {}): Env {
+  const schema = resolveSchema({
+    TABLE_PREFIX: overrides.TABLE_PREFIX,
+  } as Pick<Env, "TABLE_PREFIX">);
   return {
-    DB: new SqliteD1(),
+    DB: new SqliteD1(schema),
     KV: new MockKV(),
     JWT_SECRET: TEST_JWT_SECRET,
     SETUP_SECRET: TEST_SETUP_SECRET,

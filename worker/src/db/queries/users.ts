@@ -1,7 +1,11 @@
 import type { User, User2FA } from "../../types";
 
+// users / user_2fa / system_settings 数据访问（SPEC §3/§8）。
+// 表名一律经显式传入的 prefix（getTablePrefix(env) 结果）拼装，禁止裸表名。
+
 export async function createUser(
   db: D1Database,
+  prefix: string,
   data: {
     id: string;
     email: string;
@@ -13,7 +17,7 @@ export async function createUser(
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO users (id, email, password_hash, role, is_active, approval_status, display_name, timezone, language, created_at, updated_at)
+      `INSERT INTO ${prefix}users (id, email, password_hash, role, is_active, approval_status, display_name, timezone, language, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, '', 'Asia/Shanghai', 'zh', ?, ?)`,
     )
     .bind(
@@ -32,14 +36,15 @@ export async function createUser(
 // 首个账号同时直接 approved（setup/首账号不等批准）。
 export async function createUserFirstIsAdmin(
   db: D1Database,
+  prefix: string,
   data: { id: string; email: string; password_hash: string },
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO users (id, email, password_hash, role, is_active, approval_status, display_name, timezone, language, created_at, updated_at)
-       SELECT ?, ?, ?, CASE WHEN (SELECT COUNT(*) FROM users) = 0 THEN 'admin' ELSE 'user' END, 1,
-              CASE WHEN (SELECT COUNT(*) FROM users) = 0 THEN 'approved' ELSE 'pending' END,
+      `INSERT INTO ${prefix}users (id, email, password_hash, role, is_active, approval_status, display_name, timezone, language, created_at, updated_at)
+       SELECT ?, ?, ?, CASE WHEN (SELECT COUNT(*) FROM ${prefix}users) = 0 THEN 'admin' ELSE 'user' END, 1,
+              CASE WHEN (SELECT COUNT(*) FROM ${prefix}users) = 0 THEN 'approved' ELSE 'pending' END,
               '', 'Asia/Shanghai', 'zh', ?, ?`,
     )
     .bind(data.id, data.email, data.password_hash, now, now)
@@ -48,23 +53,29 @@ export async function createUserFirstIsAdmin(
 
 export async function findUserByEmail(
   db: D1Database,
+  prefix: string,
   email: string,
 ): Promise<User | null> {
   return db
-    .prepare(`SELECT * FROM users WHERE email = ? COLLATE NOCASE`)
+    .prepare(`SELECT * FROM ${prefix}users WHERE email = ? COLLATE NOCASE`)
     .bind(email.trim())
     .first<User>();
 }
 
 export async function findUserById(
   db: D1Database,
+  prefix: string,
   id: string,
 ): Promise<User | null> {
-  return db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<User>();
+  return db
+    .prepare(`SELECT * FROM ${prefix}users WHERE id = ?`)
+    .bind(id)
+    .first<User>();
 }
 
 export async function updateUser(
   db: D1Database,
+  prefix: string,
   id: string,
   data: Partial<
     Pick<
@@ -100,25 +111,37 @@ export async function updateUser(
   const values = entries.map(([, val]) => val);
 
   await db
-    .prepare(`UPDATE users SET ${setClauses}, updated_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE ${prefix}users SET ${setClauses}, updated_at = ? WHERE id = ?`,
+    )
     .bind(...values, now, id)
     .run();
 }
 
-export async function deleteUser(db: D1Database, id: string): Promise<void> {
-  await db.prepare(`DELETE FROM users WHERE id = ?`).bind(id).run();
+export async function deleteUser(
+  db: D1Database,
+  prefix: string,
+  id: string,
+): Promise<void> {
+  await db.prepare(`DELETE FROM ${prefix}users WHERE id = ?`).bind(id).run();
 }
 
-export async function listUsers(db: D1Database): Promise<User[]> {
+export async function listUsers(
+  db: D1Database,
+  prefix: string,
+): Promise<User[]> {
   const result = await db
-    .prepare(`SELECT * FROM users ORDER BY created_at DESC`)
+    .prepare(`SELECT * FROM ${prefix}users ORDER BY created_at DESC`)
     .all<User>();
   return result.results;
 }
 
-export async function countUsers(db: D1Database): Promise<number> {
+export async function countUsers(
+  db: D1Database,
+  prefix: string,
+): Promise<number> {
   const row = await db
-    .prepare(`SELECT COUNT(*) as count FROM users`)
+    .prepare(`SELECT COUNT(*) as count FROM ${prefix}users`)
     .first<{ count: number }>();
   return row?.count ?? 0;
 }
@@ -127,16 +150,18 @@ export async function countUsers(db: D1Database): Promise<number> {
 
 export async function get2FAConfig(
   db: D1Database,
+  prefix: string,
   userId: string,
 ): Promise<User2FA | null> {
   return db
-    .prepare(`SELECT * FROM user_2fa WHERE user_id = ?`)
+    .prepare(`SELECT * FROM ${prefix}user_2fa WHERE user_id = ?`)
     .bind(userId)
     .first<User2FA>();
 }
 
 export async function upsert2FAConfig(
   db: D1Database,
+  prefix: string,
   userId: string,
   data: Partial<Omit<User2FA, "user_id" | "updated_at">>,
 ): Promise<void> {
@@ -172,7 +197,7 @@ export async function upsert2FAConfig(
 
   await db
     .prepare(
-      `INSERT INTO user_2fa (${columns.join(", ")}) VALUES (${placeholders.join(", ")})
+      `INSERT INTO ${prefix}user_2fa (${columns.join(", ")}) VALUES (${placeholders.join(", ")})
        ON CONFLICT(user_id) DO UPDATE SET ${updateClauses.join(", ")}`,
     )
     .bind(...insertValues)
@@ -183,10 +208,11 @@ export async function upsert2FAConfig(
 
 export async function getSetting(
   db: D1Database,
+  prefix: string,
   key: string,
 ): Promise<string | null> {
   const row = await db
-    .prepare(`SELECT value FROM system_settings WHERE key = ?`)
+    .prepare(`SELECT value FROM ${prefix}system_settings WHERE key = ?`)
     .bind(key)
     .first<{ value: string }>();
   return row?.value ?? null;
@@ -194,13 +220,14 @@ export async function getSetting(
 
 export async function setSetting(
   db: D1Database,
+  prefix: string,
   key: string,
   value: string,
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)
+      `INSERT INTO ${prefix}system_settings (key, value, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
     .bind(key, value, now)
@@ -209,9 +236,10 @@ export async function setSetting(
 
 export async function getAllSettings(
   db: D1Database,
+  prefix: string,
 ): Promise<Record<string, string>> {
   const result = await db
-    .prepare(`SELECT key, value FROM system_settings`)
+    .prepare(`SELECT key, value FROM ${prefix}system_settings`)
     .all<{ key: string; value: string }>();
   return Object.fromEntries(result.results.map((row) => [row.key, row.value]));
 }

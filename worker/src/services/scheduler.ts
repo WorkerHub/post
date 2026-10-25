@@ -1,10 +1,11 @@
 import type { Env, Letter, LetterRecipient } from "../types";
+import { tables } from "../types";
 import { sendEmail } from "./email";
 import { sanitizeBodyHtml } from "./sanitize";
 
 // cron 调度与逐收件人投递（SPEC §5）。
 // 防重复用 D1 状态抢占（不用 KV dedupe）：
-//   UPDATE letters SET status='sending' WHERE id=? AND status='scheduled'
+//   UPDATE {prefix}letters SET status='sending' WHERE id=? AND status='scheduled'
 // 影响行数为 1 才发送；同一封信被并发 cron 抢占时只有一方会拿到行数=1。
 // 逐收件人单独发一封（独立 RCPT，收件人之间互不可见）；全部成功 → letters 置 sent；
 // 部分失败 → 失败者记录 error，letters attempts+1 回到 scheduled，下个周期只补发失败收件人；
@@ -21,6 +22,7 @@ export interface DeliveryStats {
 }
 
 export async function processDueLetters(env: Env): Promise<DeliveryStats> {
+  const T = tables(env);
   const now = new Date().toISOString();
   const stats: DeliveryStats = {
     scanned: 0,
@@ -30,7 +32,7 @@ export async function processDueLetters(env: Env): Promise<DeliveryStats> {
   };
 
   const due = await env.DB.prepare(
-    `SELECT id FROM letters
+    `SELECT id FROM ${T.letters}
      WHERE status = 'scheduled' AND send_at IS NOT NULL AND send_at <= ?
      ORDER BY send_at ASC, id ASC
      LIMIT ?`,
@@ -66,11 +68,12 @@ export async function deliverLetter(
   env: Env,
   letterId: string,
 ): Promise<DeliverOutcome> {
+  const T = tables(env);
   const now = new Date().toISOString();
 
   // 状态抢占：只有把 scheduled → sending 的这一次更新生效（changes=1）才继续发送。
   const claim = await env.DB.prepare(
-    `UPDATE letters SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'scheduled'`,
+    `UPDATE ${T.letters} SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'scheduled'`,
   )
     .bind(now, letterId)
     .run();
@@ -86,7 +89,7 @@ export async function deliverLetter(
     console.error(`Delivery error for letter ${letterId}:`, err);
     try {
       await env.DB.prepare(
-        `UPDATE letters SET status = 'scheduled', updated_at = ? WHERE id = ? AND status = 'sending'`,
+        `UPDATE ${T.letters} SET status = 'scheduled', updated_at = ? WHERE id = ? AND status = 'sending'`,
       )
         .bind(new Date().toISOString(), letterId)
         .run();
@@ -101,13 +104,14 @@ async function deliverClaimedLetter(
   env: Env,
   letterId: string,
 ): Promise<DeliverOutcome> {
-  const letter = await env.DB.prepare(`SELECT * FROM letters WHERE id = ?`)
+  const T = tables(env);
+  const letter = await env.DB.prepare(`SELECT * FROM ${T.letters} WHERE id = ?`)
     .bind(letterId)
     .first<Letter>();
   if (!letter) return "error";
 
   const recipients = await env.DB.prepare(
-    `SELECT * FROM letter_recipients WHERE letter_id = ? ORDER BY id ASC`,
+    `SELECT * FROM ${T.letter_recipients} WHERE letter_id = ? ORDER BY id ASC`,
   )
     .bind(letterId)
     .all<LetterRecipient>();
@@ -133,7 +137,7 @@ async function deliverClaimedLetter(
 
     if (result.success) {
       await env.DB.prepare(
-        `UPDATE letter_recipients SET status = 'sent', error = NULL, sent_at = ? WHERE id = ?`,
+        `UPDATE ${T.letter_recipients} SET status = 'sent', error = NULL, sent_at = ? WHERE id = ?`,
       )
         .bind(new Date().toISOString(), recipient.id)
         .run();
@@ -141,7 +145,7 @@ async function deliverClaimedLetter(
       const error = result.error ?? "SMTP error";
       failures.push({ email: recipient.email, error });
       await env.DB.prepare(
-        `UPDATE letter_recipients SET status = 'failed', error = ?, sent_at = NULL WHERE id = ?`,
+        `UPDATE ${T.letter_recipients} SET status = 'failed', error = ?, sent_at = NULL WHERE id = ?`,
       )
         .bind(error, recipient.id)
         .run();
@@ -160,7 +164,7 @@ async function deliverClaimedLetter(
 
   if (attempts >= MAX_ATTEMPTS) {
     await env.DB.prepare(
-      `UPDATE letters SET status = 'failed', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE ${T.letters} SET status = 'failed', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`,
     )
       .bind(attempts, lastError, new Date().toISOString(), letterId)
       .run();
@@ -169,7 +173,7 @@ async function deliverClaimedLetter(
 
   // 部分失败：回到 scheduled，下个 cron 周期只补发失败收件人（sent 的不会重发）。
   await env.DB.prepare(
-    `UPDATE letters SET status = 'scheduled', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`,
+    `UPDATE ${T.letters} SET status = 'scheduled', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`,
   )
     .bind(attempts, lastError, new Date().toISOString(), letterId)
     .run();
@@ -177,9 +181,10 @@ async function deliverClaimedLetter(
 }
 
 async function markLetterSent(env: Env, letterId: string): Promise<void> {
+  const T = tables(env);
   const now = new Date().toISOString();
   await env.DB.prepare(
-    `UPDATE letters SET status = 'sent', sent_at = ?, last_error = NULL, updated_at = ? WHERE id = ?`,
+    `UPDATE ${T.letters} SET status = 'sent', sent_at = ?, last_error = NULL, updated_at = ? WHERE id = ?`,
   )
     .bind(now, now, letterId)
     .run();

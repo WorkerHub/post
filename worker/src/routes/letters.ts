@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { HonoEnv, Letter, LetterRecipient } from "../types";
+import { getTablePrefix, tables } from "../types";
 import { authMiddleware, getAuthUserId } from "../middleware/auth";
 import { isValidEmail } from "../services/email";
 import { sanitizeBodyHtml } from "../services/sanitize";
@@ -100,7 +101,7 @@ async function fetchOwnedLetter(
   c: Context<HonoEnv>,
   id: string,
 ): Promise<Letter | null> {
-  const letter = await getLetterById(c.env.DB, id);
+  const letter = await getLetterById(c.env.DB, getTablePrefix(c.env), id);
   if (!letter || letter.user_id !== getAuthUserId(c)) return null;
   return letter;
 }
@@ -120,10 +121,10 @@ function isEditableStatus(letter: Letter): boolean {
  * （部分投递成功后信件可能被 cancel 或 failed→resend→cancel，此时仍带 sent 收件人。）
  */
 async function hasDeliveredRecipients(
-  db: D1Database,
+  c: Context<HonoEnv>,
   letterId: string,
 ): Promise<boolean> {
-  return (await countSentRecipients(db, letterId)) > 0;
+  return (await countSentRecipients(c.env.DB, getTablePrefix(c.env), letterId)) > 0;
 }
 
 /** scheduled 不变量：收件人非空 + send_at 晚于当前时间。返回 null 表示通过。 */
@@ -141,6 +142,7 @@ function scheduledInvariantError(
 /** 校验并解析收件人快照：联系人引用读库落快照，手填校验格式，按邮箱去重。 */
 async function resolveRecipients(
   db: D1Database,
+  prefix: string,
   userId: string,
   input: unknown,
 ): Promise<
@@ -169,7 +171,7 @@ async function resolveRecipients(
 
     if (typeof r.contact_id === "string" && r.contact_id) {
       // 联系人引用：读库落快照（name/email 以联系人当前记录为准，不随后续修改变化）
-      const contact = await getContactById(db, r.contact_id);
+      const contact = await getContactById(db, prefix, r.contact_id);
       if (!contact || contact.user_id !== userId) {
         return { error: "联系人不存在" };
       }
@@ -266,7 +268,12 @@ async function parseLetterFields(
     out.is_public = body.is_public ? 1 : 0;
   }
   if (body.recipients !== undefined) {
-    const resolved = await resolveRecipients(c.env.DB, userId, body.recipients);
+    const resolved = await resolveRecipients(
+      c.env.DB,
+      getTablePrefix(c.env),
+      userId,
+      body.recipients,
+    );
     if (resolved.error) {
       return {
         error: c.json({ error: resolved.error }, 400),
@@ -284,14 +291,15 @@ async function replaceRecipients(
   letterId: string,
   recipients: ResolvedRecipient[],
 ): Promise<void> {
+  const T = tables(c.env);
   const now = new Date().toISOString();
   const statements = [
     c.env.DB.prepare(
-      `DELETE FROM letter_recipients WHERE letter_id = ?`,
+      `DELETE FROM ${T.letter_recipients} WHERE letter_id = ?`,
     ).bind(letterId),
     ...recipients.map((r) =>
       c.env.DB.prepare(
-        `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
+        `INSERT INTO ${T.letter_recipients} (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
          VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?)`,
       ).bind(generateId(), letterId, r.contact_id, r.name, r.email, now),
     ),
@@ -304,8 +312,9 @@ async function respondWithLetter(
   id: string,
   status: 200 | 201 = 200,
 ): Promise<Response> {
-  const letter = await getLetterById(c.env.DB, id);
-  const recipients = await listRecipientsByLetter(c.env.DB, id);
+  const prefix = getTablePrefix(c.env);
+  const letter = await getLetterById(c.env.DB, prefix, id);
+  const recipients = await listRecipientsByLetter(c.env.DB, prefix, id);
   return c.json(serializeLetter(letter!, recipients), status);
 }
 
@@ -313,14 +322,15 @@ async function respondWithLetter(
 
 lettersRoutes.get("/", async (c) => {
   const userId = getAuthUserId(c);
+  const prefix = getTablePrefix(c.env);
   const statusParam = c.req.query("status");
   if (statusParam && !VALID_STATUSES.has(statusParam)) {
     return c.json({ error: "Invalid status" }, 400);
   }
-  const letters = await listLettersByUser(c.env.DB, userId, statusParam);
+  const letters = await listLettersByUser(c.env.DB, prefix, userId, statusParam);
   const out: Record<string, unknown>[] = [];
   for (const letter of letters) {
-    const recipients = await listRecipientsByLetter(c.env.DB, letter.id);
+    const recipients = await listRecipientsByLetter(c.env.DB, prefix, letter.id);
     out.push(serializeLetter(letter, recipients));
   }
   return c.json({ letters: out });
@@ -339,7 +349,7 @@ lettersRoutes.post("/", async (c) => {
   if ("error" in parsed) return parsed.error;
 
   const id = generateId();
-  await createLetter(c.env.DB, {
+  await createLetter(c.env.DB, getTablePrefix(c.env), {
     id,
     user_id: userId,
     title: parsed.title ?? "",
@@ -373,7 +383,7 @@ lettersRoutes.put("/:id", async (c) => {
   if (!isEditableStatus(letter)) {
     return c.json({ error: "寄出后不可再编辑" }, 409);
   }
-  if (await hasDeliveredRecipients(c.env.DB, id)) {
+  if (await hasDeliveredRecipients(c, id)) {
     return c.json({ error: "已开始投递的信不可再编辑" }, 409);
   }
 
@@ -405,7 +415,7 @@ lettersRoutes.put("/:id", async (c) => {
     is_public: parsed.is_public ?? 0,
   };
   if (targetStatus !== letter.status) updates.status = targetStatus;
-  await updateLetter(c.env.DB, id, updates);
+  await updateLetter(c.env.DB, getTablePrefix(c.env), id, updates);
 
   await replaceRecipients(c, id, targetRecipients);
 
@@ -438,7 +448,7 @@ lettersRoutes.patch("/:id", async (c) => {
     if (!isEditableStatus(letter)) {
       return c.json({ error: "寄出后不可再编辑" }, 409);
     }
-    if (await hasDeliveredRecipients(c.env.DB, id)) {
+    if (await hasDeliveredRecipients(c, id)) {
       return c.json({ error: "已开始投递的信不可再编辑" }, 409);
     }
   }
@@ -459,7 +469,8 @@ lettersRoutes.patch("/:id", async (c) => {
 
   if (targetStatus === "scheduled") {
     const count =
-      effectiveRecipientCount ?? (await countRecipientsByLetter(c.env.DB, id));
+      effectiveRecipientCount ??
+      (await countRecipientsByLetter(c.env.DB, getTablePrefix(c.env), id));
     const invErr = scheduledInvariantError(count, effectiveSendAt);
     if (invErr) return c.json({ error: invErr }, 400);
   }
@@ -474,7 +485,7 @@ lettersRoutes.patch("/:id", async (c) => {
   if (targetStatus !== letter.status) updates.status = targetStatus;
 
   if (Object.keys(updates).length > 0) {
-    await updateLetter(c.env.DB, id, updates);
+    await updateLetter(c.env.DB, getTablePrefix(c.env), id, updates);
   }
 
   if (parsed.recipients !== undefined) {
@@ -492,7 +503,7 @@ lettersRoutes.delete("/:id", async (c) => {
   if (letter.status === "sending") {
     return c.json({ error: "发送中，暂不可删除" }, 409);
   }
-  await deleteLetter(c.env.DB, letter.id);
+  await deleteLetter(c.env.DB, getTablePrefix(c.env), letter.id);
   return c.json({ success: true });
 });
 
@@ -507,12 +518,16 @@ lettersRoutes.post("/:id/schedule", async (c) => {
     return c.json({ error: "当前状态不可定时寄出" }, 409);
   }
 
-  const recipientCount = await countRecipientsByLetter(c.env.DB, id);
+  const recipientCount = await countRecipientsByLetter(
+    c.env.DB,
+    getTablePrefix(c.env),
+    id,
+  );
   const invErr = scheduledInvariantError(recipientCount, letter.send_at);
   if (invErr) return c.json({ error: invErr }, 400);
 
   if (letter.status === "draft") {
-    await updateLetter(c.env.DB, id, {
+    await updateLetter(c.env.DB, getTablePrefix(c.env), id, {
       status: "scheduled",
       attempts: 0,
       last_error: null,
@@ -534,11 +549,11 @@ lettersRoutes.post("/:id/draft", async (c) => {
   if (letter.status !== "scheduled" && letter.status !== "cancelled") {
     return c.json({ error: "仅待寄出或已取消的信可撤回草稿" }, 409);
   }
-  if (await hasDeliveredRecipients(c.env.DB, id)) {
+  if (await hasDeliveredRecipients(c, id)) {
     return c.json({ error: "已开始投递的信不可撤回草稿" }, 409);
   }
 
-  await updateLetter(c.env.DB, id, { status: "draft", last_error: null });
+  await updateLetter(c.env.DB, getTablePrefix(c.env), id, { status: "draft", last_error: null });
   return respondWithLetter(c, id);
 });
 
@@ -554,7 +569,7 @@ lettersRoutes.post("/:id/cancel", async (c) => {
     return c.json({ error: "仅待寄出的信可取消" }, 409);
   }
 
-  await updateLetter(c.env.DB, id, { status: "cancelled", last_error: null });
+  await updateLetter(c.env.DB, getTablePrefix(c.env), id, { status: "cancelled", last_error: null });
   return respondWithLetter(c, id);
 });
 
@@ -568,12 +583,12 @@ lettersRoutes.post("/:id/resend", async (c) => {
   }
 
   // attempts 归零回 scheduled；只补发失败的收件人（已成功的保留，不重复投递）。
-  await updateLetter(c.env.DB, id, {
+  await updateLetter(c.env.DB, getTablePrefix(c.env), id, {
     status: "scheduled",
     attempts: 0,
     last_error: null,
   });
-  await resetFailedRecipientsForResend(c.env.DB, id);
+  await resetFailedRecipientsForResend(c.env.DB, getTablePrefix(c.env), id);
 
   return respondWithLetter(c, id);
 });

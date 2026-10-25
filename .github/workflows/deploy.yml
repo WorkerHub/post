@@ -39,6 +39,7 @@ jobs:
           D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
           KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
+          TABLE_PREFIX: ${{ vars.TABLE_PREFIX }}
         run: |
           APP_VERSION="$(node -p "require('../package.json').version")" \
           perl -pi -e '
@@ -48,6 +49,11 @@ jobs:
             s/KV_NAMESPACE_ID_PLACEHOLDER/$ENV{KV_NAMESPACE_ID}/g;
             s/__APP_VERSION__/'\''$ENV{APP_VERSION}'\''/g;
           ' wrangler.toml
+          # 可选表前缀（非 secret）：仅当 GitHub Variable TABLE_PREFIX 非空时注入 [vars]；
+          # 未配置时 Worker 回退到默认 "post_"（共享 D1 零配置隔离）。
+          if [ -n "$TABLE_PREFIX" ]; then
+            printf '\n[vars]\nTABLE_PREFIX = "%s"\n' "$TABLE_PREFIX" >> wrangler.toml
+          fi
 
       - name: Write secrets file
         working-directory: worker

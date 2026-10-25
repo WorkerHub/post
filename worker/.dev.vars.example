@@ -2,3 +2,6 @@
 # 线上请用 `wrangler secret put JWT_SECRET` / `wrangler secret put SETUP_SECRET` 配置。
 JWT_SECRET=test-jwt-secret-0123456789abcdef
 SETUP_SECRET=local-dev-setup-secret
+
+# 可选表前缀（非 secret）：不设/留空 → 默认 "post_"；"" → 显式无前缀；其他值须匹配 /^[a-z0-9_]*$/。
+# TABLE_PREFIX=post_

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeEnv } from "./helpers";
-import type { Env, Letter } from "../src/types";
+import { tables, type Env, type Letter } from "../src/types";
 import { buildLetterHtml, deliverLetter, processDueLetters } from "../src/services/scheduler";
 
 const sendEmailMock = vi.hoisted(() => vi.fn());
@@ -13,13 +13,14 @@ async function seedLetter(
   recipients: { id: string; email: string; status?: string }[],
   letterOverrides: Partial<Letter> = {},
 ): Promise<string> {
+  const T = tables(env);
   await env.DB.prepare(
-    `INSERT OR IGNORE INTO users (id, email, password_hash, role, is_active, approval_status, created_at, updated_at)
+    `INSERT OR IGNORE INTO ${T.users} (id, email, password_hash, role, is_active, approval_status, created_at, updated_at)
      VALUES ('u1', 'a@b.c', 'h', 'user', 1, 'approved', '2026-01-01', '2026-01-01')`,
   ).run();
   const letterId = letterOverrides.id ?? "letter-1";
   await env.DB.prepare(
-    `INSERT INTO letters (id, user_id, title, body_html, body_json, send_at, timezone, status, is_public, attempts, created_at, updated_at)
+    `INSERT INTO ${T.letters} (id, user_id, title, body_html, body_json, send_at, timezone, status, is_public, attempts, created_at, updated_at)
      VALUES (?, 'u1', ?, ?, '', ?, ?, ?, 0, ?, ?, ?)`,
   )
     .bind(
@@ -37,7 +38,7 @@ async function seedLetter(
 
   for (const r of recipients) {
     await env.DB.prepare(
-      `INSERT INTO letter_recipients (id, letter_id, name, email, status, created_at)
+      `INSERT INTO ${T.letter_recipients} (id, letter_id, name, email, status, created_at)
        VALUES (?, ?, '', ?, ?, '2026-01-01')`,
     )
       .bind(r.id, letterId, r.email, r.status ?? "pending")
@@ -47,12 +48,14 @@ async function seedLetter(
 }
 
 async function letterById(env: Env, id: string) {
-  return env.DB.prepare(`SELECT * FROM letters WHERE id = ?`).bind(id).first<Letter>();
+  return env.DB.prepare(`SELECT * FROM ${tables(env).letters} WHERE id = ?`)
+    .bind(id)
+    .first<Letter>();
 }
 
 async function recipientsOf(env: Env, letterId: string) {
   const res = await env.DB.prepare(
-    `SELECT * FROM letter_recipients WHERE letter_id = ? ORDER BY id ASC`,
+    `SELECT * FROM ${tables(env).letter_recipients} WHERE letter_id = ? ORDER BY id ASC`,
   )
     .bind(letterId)
     .all<{ id: string; email: string; status: string; error: string | null }>();

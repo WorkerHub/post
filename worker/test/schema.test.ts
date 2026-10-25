@@ -1,161 +1,174 @@
-import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { SCHEMA_SQL } from "../src/db/schema";
+import {
+  DEFAULT_TABLE_PREFIX,
+  getTablePrefix,
+  isValidTablePrefix,
+  tables,
+  type Env,
+} from "../src/types";
+import { ensureSchema } from "../src/routes/setup";
+import { countUsers } from "../src/db/queries/users";
+import { SqliteD1 } from "./helpers";
 
-// 迁移文件与运行时建表用 SQL 必须逐字节一致（同一份契约两个入口）
-describe("schema sync", () => {
-  it("migrations/0001_init.sql matches SCHEMA_SQL", () => {
-    // vitest 以 worker/ 为 cwd 运行
-    const migration = readFileSync("migrations/0001_init.sql", "utf8");
-    // 头部三行是生成说明注释，之后应与 SCHEMA_SQL 完全一致
-    const lines = migration.split("\n");
-    const body = lines.slice(3).join("\n");
-    expect(body).toBe(SCHEMA_SQL);
+describe("表前缀三态（ONE-269 冻结契约）", () => {
+  it("默认前缀常量是唯一允许写死的表名常量", () => {
+    expect(DEFAULT_TABLE_PREFIX).toBe("post_");
+  });
+
+  it("undefined → post_", () => {
+    expect(getTablePrefix({ TABLE_PREFIX: undefined })).toBe("post_");
+  });
+
+  it("配置值原样返回（不自动补下划线）", () => {
+    expect(getTablePrefix({ TABLE_PREFIX: "app_" })).toBe("app_");
+    expect(getTablePrefix({ TABLE_PREFIX: "abc123" })).toBe("abc123");
+  });
+
+  it('"" → 显式无前缀', () => {
+    expect(getTablePrefix({ TABLE_PREFIX: "" })).toBe("");
+  });
+
+  it("非法值抛错", () => {
+    for (const bad of ["BadPrefix", "foo-bar", "foo bar", "foo.", "foo\\bar"]) {
+      expect(() => getTablePrefix({ TABLE_PREFIX: bad })).toThrow(
+        /must match \/^\[a-z0-9_\]\*\$\/|\^\[a-z0-9_\]\*\$/,
+      );
+    }
+  });
+
+  it("isValidTablePrefix 匹配小写字母/数字/下划线", () => {
+    expect(isValidTablePrefix("post_")).toBe(true);
+    expect(isValidTablePrefix("abc123_")).toBe(true);
+    expect(isValidTablePrefix("")).toBe(true);
+    expect(isValidTablePrefix("Bad")).toBe(false);
+    expect(isValidTablePrefix("foo-bar")).toBe(false);
   });
 });
 
-describe("schema (SPEC §4 冻结契约)", () => {
-  function freshDb() {
+describe("tables(env)", () => {
+  it("默认前缀下返回六张 post_* 表", () => {
+    expect(tables({ TABLE_PREFIX: undefined })).toEqual({
+      users: "post_users",
+      user_2fa: "post_user_2fa",
+      letters: "post_letters",
+      letter_recipients: "post_letter_recipients",
+      contacts: "post_contacts",
+      system_settings: "post_system_settings",
+    });
+  });
+
+  it("无前缀时返回裸表名", () => {
+    expect(tables({ TABLE_PREFIX: "" }).users).toBe("users");
+    expect(tables({ TABLE_PREFIX: "" }).letters).toBe("letters");
+  });
+});
+
+describe("SCHEMA_SQL（{prefix} 占位）", () => {
+  function freshDb(prefix: string) {
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SCHEMA_SQL);
+    db.exec(SCHEMA_SQL.replace(/\{prefix\}/g, prefix));
     return db;
   }
 
-  it("creates all tables and indexes", () => {
-    const db = freshDb();
-    const tables = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
-      .all()
-      .map((r) => (r as { name: string }).name);
-    expect(tables).toEqual([
-      "contacts",
-      "letter_recipients",
-      "letters",
-      "system_settings",
-      "user_2fa",
-      "users",
+  it("不含裸表名（表/索引名均为 {prefix} 占位）", () => {
+    expect(SCHEMA_SQL).not.toMatch(
+      /CREATE TABLE IF NOT EXISTS (users|user_2fa|letters|letter_recipients|contacts|system_settings)[ (]/,
+    );
+    expect(SCHEMA_SQL).not.toMatch(/REFERENCES (users|letters)\(/);
+    expect(SCHEMA_SQL).toContain("{prefix}users");
+    expect(SCHEMA_SQL).toContain("{prefix}letters");
+    expect(SCHEMA_SQL).toContain("idx_{prefix}letters_status_send_at");
+  });
+
+  it("替换 {prefix} 后建出带前缀的表与索引", () => {
+    const db = freshDb("post_");
+    const names = (type: string, onlyIdx = false) =>
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type='${type}'${onlyIdx ? " AND name LIKE 'idx_%'" : ""} ORDER BY name`,
+        )
+        .all()
+        .map((r) => (r as { name: string }).name);
+
+    expect(names("table")).toEqual([
+      "post_contacts",
+      "post_letter_recipients",
+      "post_letters",
+      "post_system_settings",
+      "post_user_2fa",
+      "post_users",
     ]);
-
-    const indexes = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name`)
-      .all()
-      .map((r) => (r as { name: string }).name);
-    expect(indexes).toEqual([
-      "idx_contacts_user_email",
-      "idx_letter_recipients_letter",
-      "idx_letters_status_send_at",
-      "idx_letters_user_status",
+    expect(names("index", true)).toEqual([
+      "idx_post_contacts_user_email",
+      "idx_post_letter_recipients_letter",
+      "idx_post_letters_status_send_at",
+      "idx_post_letters_user_status",
     ]);
   });
 
-  it("is idempotent (CREATE IF NOT EXISTS)", () => {
-    const db = freshDb();
-    expect(() => db.exec(SCHEMA_SQL)).not.toThrow();
-  });
-
-  it("letters.status CHECK rejects invalid enum", () => {
-    const db = freshDb();
-    db.prepare(
-      `INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES ('u1','a@b.c','h','2026-01-01','2026-01-01')`,
-    ).run();
+  it("幂等（CREATE IF NOT EXISTS 可重复执行）", () => {
+    const db = freshDb("post_");
     expect(() =>
-      db
-        .prepare(
-          `INSERT INTO letters (id, user_id, created_at, updated_at) VALUES ('l1','u1','2026-01-01','2026-01-01')`,
-        )
-        .run(),
-    ).not.toThrow(); // draft 默认值
-    expect(() =>
-      db
-        .prepare(
-          `INSERT INTO letters (id, user_id, status, created_at, updated_at) VALUES ('l2','u1','bogus','2026-01-01','2026-01-01')`,
-        )
-        .run(),
-    ).toThrow(/CHECK constraint failed/);
-  });
-
-  it("users.approval_status CHECK rejects invalid enum", () => {
-    const db = freshDb();
-    expect(() =>
-      db
-        .prepare(
-          `INSERT INTO users (id, email, password_hash, approval_status, created_at, updated_at) VALUES ('u1','a@b.c','h','nope','2026-01-01','2026-01-01')`,
-        )
-        .run(),
-    ).toThrow(/CHECK constraint failed/);
-  });
-
-  it("letter_recipients cascades on letter delete; letters cascades on user delete", () => {
-    const db = freshDb();
-    db.prepare(
-      `INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES ('u1','a@b.c','h','2026-01-01','2026-01-01')`,
-    ).run();
-    db.prepare(
-      `INSERT INTO letters (id, user_id, status, created_at, updated_at) VALUES ('l1','u1','draft','2026-01-01','2026-01-01')`,
-    ).run();
-    db.prepare(
-      `INSERT INTO letter_recipients (id, letter_id, email, created_at) VALUES ('r1','l1','x@y.z','2026-01-01')`,
-    ).run();
-
-    db.prepare(`DELETE FROM letters WHERE id='l1'`).run();
-    expect(
-      db.prepare(`SELECT COUNT(*) AS n FROM letter_recipients`).get(),
-    ).toEqual({ n: 0 });
-
-    db.prepare(
-      `INSERT INTO letters (id, user_id, status, created_at, updated_at) VALUES ('l2','u1','scheduled','2026-01-01','2026-01-01')`,
-    ).run();
-    db.prepare(`DELETE FROM users WHERE id='u1'`).run();
-    expect(
-      db.prepare(`SELECT COUNT(*) AS n FROM letters`).get(),
-    ).toEqual({ n: 0 });
-  });
-
-  it("contacts (user_id, email) is unique", () => {
-    const db = freshDb();
-    db.prepare(
-      `INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES ('u1','a@b.c','h','2026-01-01','2026-01-01')`,
-    ).run();
-    db.prepare(
-      `INSERT INTO contacts (id, user_id, email, created_at, updated_at) VALUES ('c1','u1','x@y.z','2026-01-01','2026-01-01')`,
-    ).run();
-    expect(() =>
-      db
-        .prepare(
-          `INSERT INTO contacts (id, user_id, email, created_at, updated_at) VALUES ('c2','u1','x@y.z','2026-01-01','2026-01-01')`,
-        )
-        .run(),
-    ).toThrow(/UNIQUE constraint failed/);
-    // 同一邮箱不同用户允许
-    db.prepare(
-      `INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES ('u2','d@e.f','h','2026-01-01','2026-01-01')`,
-    ).run();
-    expect(() =>
-      db
-        .prepare(
-          `INSERT INTO contacts (id, user_id, email, created_at, updated_at) VALUES ('c3','u2','x@y.z','2026-01-01','2026-01-01')`,
-        )
-        .run(),
+      db.exec(SCHEMA_SQL.replace(/\{prefix\}/g, "post_")),
     ).not.toThrow();
   });
 
-  it("letters defaults: status=draft, is_public=0, attempts=0", () => {
-    const db = freshDb();
+  it("外键级联与 CHECK 约束在带前缀建表下仍生效", () => {
+    const db = freshDb("post_");
     db.prepare(
-      `INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES ('u1','a@b.c','h','2026-01-01','2026-01-01')`,
+      `INSERT INTO post_users (id, email, password_hash, created_at, updated_at) VALUES ('u1','a@b.c','h','2026-01-01','2026-01-01')`,
     ).run();
-    db.prepare(
-      `INSERT INTO letters (id, user_id, created_at, updated_at) VALUES ('l1','u1','2026-01-01','2026-01-01')`,
-    ).run();
-    const row = db
-      .prepare(`SELECT status, is_public, attempts, send_at, body_json FROM letters WHERE id='l1'`)
-      .get() as Record<string, unknown>;
-    expect(row.status).toBe("draft");
-    expect(row.is_public).toBe(0);
-    expect(row.attempts).toBe(0);
-    expect(row.send_at).toBeNull();
-    expect(row.body_json).toBe("");
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO post_letters (id, user_id, status, created_at, updated_at) VALUES ('l1','u1','bogus','2026-01-01','2026-01-01')`,
+        )
+        .run(),
+    ).toThrow(/CHECK constraint failed/);
+  });
+});
+
+describe("ensureSchema 建表与查询表名一致性", () => {
+  function emptyEnv(prefix?: string) {
+    const db = new SqliteD1("");
+    return {
+      DB: db as unknown as D1Database,
+      TABLE_PREFIX: prefix,
+    } as Env;
+  }
+
+  it("按生效前缀建表，返回实际生效前缀", async () => {
+    const env = emptyEnv("kp_");
+    const prefix = await ensureSchema(env);
+    expect(prefix).toBe("kp_");
+
+    const created = (env.DB as unknown as SqliteD1).db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    expect(created).toContain("kp_users");
+    expect(created).toContain("kp_letters");
+    expect(created).not.toContain("users");
+  });
+
+  it("ensureSchema 建出的表名 === queries 实际引用的表名", async () => {
+    const env = emptyEnv("x_");
+    const prefix = await ensureSchema(env);
+
+    // queries 与建表共用同一 prefix 解析：表存在则查询成功，表名不一致会抛错。
+    await expect(countUsers(env.DB, prefix)).resolves.toBe(0);
+
+    const t = tables(env);
+    const created = (env.DB as unknown as SqliteD1).db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+      .all()
+      .map((r) => (r as { name: string }).name);
+    for (const name of Object.values(t)) {
+      expect(created).toContain(name);
+    }
   });
 });

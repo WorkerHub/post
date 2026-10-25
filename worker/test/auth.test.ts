@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { setupRoutes } from "../src/routes/setup";
-import type { HonoEnv } from "../src/types";
+import { getTablePrefix, type HonoEnv } from "../src/types";
 import { countUsers, listUsers } from "../src/db/queries/users";
 import {
   cookieHeader,
@@ -360,7 +360,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
       ).toBe(500);
 
       // 建号确实没有发生
-      expect(await countUsers(env.DB)).toBe(0);
+      expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
     },
   );
 
@@ -377,7 +377,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
     );
     expect(setup.status).toBe(500);
     expect((await request(env, "/api/health")).status).toBe(500);
-    expect(await countUsers(env.DB)).toBe(0);
+    expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
   });
 
   it.each([
@@ -397,7 +397,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
       ),
     );
     expect(setup.status).toBe(500);
-    expect(await countUsers(env.DB)).toBe(0);
+    expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
   });
 
   it("路由层防守校验独立生效（不经 fail-safe 中间件，双保险）", async () => {
@@ -426,7 +426,7 @@ describe("敏感密钥占位符防绕过（ONE-192 Blocking）", () => {
       );
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({ error: "Server misconfigured" });
-      expect(await countUsers(env.DB)).toBe(0);
+      expect(await countUsers(env.DB, getTablePrefix(env))).toBe(0);
     }
   });
 });
@@ -461,7 +461,7 @@ describe("并发 setup 竞态（ONE-192 Should-fix）", () => {
     expect(loser.body).toEqual({ error: "Setup is closed" });
 
     // 库里只有胜者一个 admin；竞态插入的 user 行已被清理
-    const users = await listUsers(env.DB);
+    const users = await listUsers(env.DB, getTablePrefix(env));
     expect(users).toHaveLength(1);
     expect(users[0].role).toBe("admin");
     expect(users[0].approval_status).toBe("approved");

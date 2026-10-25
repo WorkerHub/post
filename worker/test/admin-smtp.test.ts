@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { tables } from "../src/types";
 import {
   cookieHeader,
   doSetup,
@@ -87,7 +88,7 @@ describe("管理后台 SMTP 配置与测试邮件（ONE-176）", () => {
     expect(get.body.password_set).toBe(true);
 
     // 落库原文用于真实发送
-    const raw = await env.DB.prepare(`SELECT value FROM system_settings WHERE key = ?`)
+    const raw = await env.DB.prepare(`SELECT value FROM ${tables(env).system_settings} WHERE key = ?`)
       .bind("smtp_config")
       .first<{ value: string }>();
     expect(JSON.parse(raw!.value).password).toBe("super-secret-password");
@@ -115,7 +116,7 @@ describe("管理后台 SMTP 配置与测试邮件（ONE-176）", () => {
       ),
     );
     expect(put2.body.password_set).toBe(true);
-    const raw = await env.DB.prepare(`SELECT value FROM system_settings WHERE key = ?`)
+    const raw = await env.DB.prepare(`SELECT value FROM ${tables(env).system_settings} WHERE key = ?`)
       .bind("smtp_config")
       .first<{ value: string }>();
     expect(JSON.parse(raw!.value).password).toBe("original-pass");

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { tables } from "../src/types";
 import {
   cookieHeader,
   doSetup,
@@ -7,6 +8,7 @@ import {
   makeEnv,
   registerAndApprove,
   request,
+  resolveSchema,
   SqliteD1,
 } from "./helpers";
 import { deleteLetter } from "../src/db/queries/letters";
@@ -225,7 +227,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
 
     // 有一个收件人已 sent（部分投递），attempts 归零也无法编辑
     await env.DB.prepare(
-      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+      `UPDATE ${tables(env).letter_recipients} SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
     )
       .bind(new Date().toISOString(), created.body.id)
       .run();
@@ -250,17 +252,17 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
     // 两个收件人：一个已 sent，一个 failed，信件置 failed
     await env.DB.prepare(
-      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+      `UPDATE ${tables(env).letter_recipients} SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
     )
       .bind(new Date().toISOString(), created.body.id)
       .run();
     await env.DB.prepare(
-      `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
+      `INSERT INTO ${tables(env).letter_recipients} (id, letter_id, contact_id, name, email, status, error, sent_at, created_at)
        VALUES ('r2', ?, NULL, '', 'second@example.com', 'failed', 'boom', NULL, '2026-01-01')`,
     )
       .bind(created.body.id)
       .run();
-    await env.DB.prepare(`UPDATE letters SET status = 'failed', attempts = 3 WHERE id = ?`)
+    await env.DB.prepare(`UPDATE ${tables(env).letters} SET status = 'failed', attempts = 3 WHERE id = ?`)
       .bind(created.body.id)
       .run();
 
@@ -286,7 +288,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
 
     // sent 收件人未被重写
     const recipients = await env.DB.prepare(
-      `SELECT email, status FROM letter_recipients WHERE letter_id = ? ORDER BY id ASC`,
+      `SELECT email, status FROM ${tables(env).letter_recipients} WHERE letter_id = ? ORDER BY id ASC`,
     )
       .bind(created.body.id)
       .all<{ email: string; status: string }>();
@@ -312,7 +314,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
 
     const failedLetter = await request(env, "/api/letters", jsonInit("POST", payload(), user));
     await env.DB.prepare(
-      `UPDATE letters SET status = 'failed', attempts = 3, last_error = 'boom' WHERE id = ?`,
+      `UPDATE ${tables(env).letters} SET status = 'failed', attempts = 3, last_error = 'boom' WHERE id = ?`,
     )
       .bind(failedLetter.body.id)
       .run();
@@ -330,7 +332,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     const { env, user } = await setupWithUser();
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
     await env.DB.prepare(
-      `UPDATE letters SET status = 'sent', is_public = 1, sent_at = ? WHERE id = ?`,
+      `UPDATE ${tables(env).letters} SET status = 'sent', is_public = 1, sent_at = ? WHERE id = ?`,
     )
       .bind(new Date().toISOString(), created.body.id)
       .run();
@@ -389,7 +391,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     const read = await request(env, `/api/letters/${created.body.id}`, { headers: user });
     expect(read.status).toBe(404);
     const recipients = await env.DB.prepare(
-      `SELECT COUNT(*) as c FROM letter_recipients WHERE letter_id = ?`,
+      `SELECT COUNT(*) as c FROM ${tables(env).letter_recipients} WHERE letter_id = ?`,
     )
       .bind(created.body.id)
       .first<{ c: number }>();
@@ -398,7 +400,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
 
   it("deleteLetter 显式清理收件人：外键关闭时也无孤儿行", async () => {
     // 关闭 PRAGMA foreign_keys，模拟 D1 连接未开启级联时仍能清理干净
-    const db = new SqliteD1(undefined, false);
+    const db = new SqliteD1(resolveSchema({ TABLE_PREFIX: "" }), false);
     await db.prepare(
       `INSERT INTO users (id, email, password_hash, role, is_active, approval_status, created_at, updated_at)
        VALUES ('u1', 'a@b.c', 'h', 'user', 1, 'approved', '2026-01-01', '2026-01-01')`,
@@ -412,7 +414,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
        VALUES ('r1', 'l1', NULL, '', 'a@b.c', 'pending', '2026-01-01')`,
     ).run();
 
-    await deleteLetter(db as unknown as D1Database, "l1");
+    await deleteLetter(db as unknown as D1Database, "", "l1");
 
     const letterCount = await db
       .prepare(`SELECT COUNT(*) as c FROM letters WHERE id = 'l1'`)
@@ -454,7 +456,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
       headers: user,
     });
     await env.DB.prepare(
-      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+      `UPDATE ${tables(env).letter_recipients} SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
     )
       .bind(new Date().toISOString(), s2.body.id)
       .run();
@@ -466,7 +468,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
 
     // failed 不可回退（走 resend）
     const failed = await request(env, "/api/letters", jsonInit("POST", payload(), user));
-    await env.DB.prepare(`UPDATE letters SET status = 'failed' WHERE id = ?`)
+    await env.DB.prepare(`UPDATE ${tables(env).letters} SET status = 'failed' WHERE id = ?`)
       .bind(failed.body.id)
       .run();
     const failDraft = await request(env, `/api/letters/${failed.body.id}/draft`, {
@@ -556,7 +558,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     });
     // 模拟部分投递：该收件人已 sent
     await env.DB.prepare(
-      `UPDATE letter_recipients SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
+      `UPDATE ${tables(env).letter_recipients} SET status = 'sent', sent_at = ? WHERE letter_id = ?`,
     )
       .bind(new Date().toISOString(), created.body.id)
       .run();
@@ -603,7 +605,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
 
     // sent 收件人快照未被抹除
     const recipients = await env.DB.prepare(
-      `SELECT status FROM letter_recipients WHERE letter_id = ?`,
+      `SELECT status FROM ${tables(env).letter_recipients} WHERE letter_id = ?`,
     )
       .bind(created.body.id)
       .all<{ status: string }>();
@@ -614,7 +616,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
   it("sending 中信不可删除", async () => {
     const { env, user } = await setupWithUser();
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));
-    await env.DB.prepare(`UPDATE letters SET status = 'sending' WHERE id = ?`)
+    await env.DB.prepare(`UPDATE ${tables(env).letters} SET status = 'sending' WHERE id = ?`)
       .bind(created.body.id)
       .run();
 

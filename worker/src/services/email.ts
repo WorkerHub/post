@@ -1,4 +1,5 @@
 import type { Env } from "../types";
+import { getTablePrefix } from "../types";
 import { getSetting } from "../db/queries/users";
 import { sendSmtpMessage } from "./smtp-transport";
 
@@ -72,7 +73,7 @@ export async function sendEmail(
     return { success: false, error: "Invalid recipient email address" };
   }
 
-  const configStr = await getSetting(env.DB, "smtp_config");
+  const configStr = await getSetting(env.DB, getTablePrefix(env), "smtp_config");
   if (!configStr) {
     return { success: false, error: "SMTP not configured" };
   }
