@@ -1,13 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setupApi } from "@/api/client";
+import { authApi, settingsApi, setupApi } from "@/api/client";
 import { MOCK_SETUP_SECRET, resetMockStore, seedFreshDeployment, state } from "@/api/mock";
+import { toMeProfile } from "@/api/mock/store";
+import type { MeProfile } from "@/api/settings";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStore } from "@/store/setup";
 import LoginPage from "./login";
 import RegisterPage from "./register";
+import SettingsPage from "./settings";
 
 function renderLogin() {
   return render(
@@ -39,9 +42,33 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   useAuthStore.setState({ isAuthenticated: false, user: null });
   useSetupStore.setState({ enabled: null });
 });
+
+/**
+ * 真实后端 POST /api/auth/login、/api/auth/2fa/verify、passkey verify 返回的是 publicUser
+ * （worker/src/routes/auth.ts），不含 twofa——这正是 ONE-332「登录后设置页空白」的根因。
+ * 联调 mock 一直回完整档案，所以这里显式模拟真实形状。
+ */
+function backendLoginUser(email: string): MeProfile {
+  const account = state.accounts.find((a) => a.email === email)!;
+  const { twofa: _twofa, ...rest } = toMeProfile(account);
+  return rest as MeProfile;
+}
+
+function renderLoginWithSettings() {
+  return render(
+    <MemoryRouter initialEntries={["/login"]}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/letters" element={<div>工作台占位</div>} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
 
 describe("登录页 · 密码登录", () => {
   it("管理员密码正确 → 登录成功进入工作台", async () => {
@@ -88,6 +115,88 @@ describe("登录页 · TOTP 二次验证", () => {
     fireEvent.click(screen.getByRole("button", { name: /验证/ }));
 
     expect(await screen.findByText("工作台占位")).toBeInTheDocument();
+  });
+});
+
+describe("登录后档案补齐（ONE-332）", () => {
+  it("无 2FA 登录：登录响应只含公开档案 → store 拿到含 twofa 的完整档案，设置页直接有内容", async () => {
+    // 模拟真实后端：登录成功即签发会话 Cookie，但响应体只有 publicUser（无 twofa）
+    vi.spyOn(authApi, "login").mockImplementationOnce(async (email) => {
+      state.sessionEmail = email.trim().toLowerCase();
+      return { requires2fa: false, user: backendLoginUser(email.trim().toLowerCase()) };
+    });
+
+    renderLoginWithSettings();
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: {
+        value: state.accounts.find((a) => a.email === "user@example.com")!.password,
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(await screen.findByText("工作台占位")).toBeInTheDocument();
+
+    const stored = useAuthStore.getState().user!;
+    expect(stored.email).toBe("user@example.com");
+    expect(stored.twofa).toEqual({
+      totp_enabled: false,
+      passkey_enabled: false,
+      preferred_method: null,
+    });
+
+    // 修复前 user.twofa 为 undefined，设置页读 user.twofa.totp_enabled 直接抛错空白
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("安全")).toBeInTheDocument();
+    expect(screen.getByText("TOTP 验证码")).toBeInTheDocument();
+  });
+
+  it("已开 TOTP 的账号：2FA 验证成功后 store 里是含真实 twofa 状态的完整档案", async () => {
+    state.twofa.totp_enabled = true;
+    vi.spyOn(authApi, "verify2fa").mockImplementationOnce(async () => {
+      state.sessionEmail = "admin@example.com";
+      return backendLoginUser("admin@example.com");
+    });
+
+    renderLoginWithSettings();
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: state.accounts.find((a) => a.email === "admin@example.com")!.password },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(await screen.findByText(/双重验证/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("六位验证码"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /验证/ }));
+
+    expect(await screen.findByText("工作台占位")).toBeInTheDocument();
+    expect(useAuthStore.getState().user!.twofa).toEqual({
+      totp_enabled: true,
+      passkey_enabled: false,
+      preferred_method: null,
+    });
+  });
+
+  it("档案读取失败 → 报错留在登录页，不把缺 twofa 的半残档案写进 store", async () => {
+    vi.spyOn(settingsApi, "getSettings").mockRejectedValueOnce(new Error("500"));
+
+    renderLoginWithSettings();
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: {
+        value: state.accounts.find((a) => a.email === "user@example.com")!.password,
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("读取账户信息失败");
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(screen.queryByText("工作台占位")).not.toBeInTheDocument();
   });
 });
 
