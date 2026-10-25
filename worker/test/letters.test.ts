@@ -7,7 +7,9 @@ import {
   makeEnv,
   registerAndApprove,
   request,
+  SqliteD1,
 } from "./helpers";
+import { deleteLetter } from "../src/db/queries/letters";
 
 const futureSendAt = () => new Date(Date.now() + 86400_000).toISOString();
 
@@ -51,6 +53,18 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     expect(res.body.recipients).toEqual([
       { contact_id: null, name: "", email: "friend@example.com" },
     ]);
+  });
+
+  it("body_json 兼容对象输入（自动 JSON.stringify，不静默置空）", async () => {
+    const { env, user } = await setupWithUser();
+    const doc = { type: "doc", content: [{ type: "paragraph" }] };
+    const res = await request(
+      env,
+      "/api/letters",
+      jsonInit("POST", payload({ body_json: doc }), user),
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.body_json).toBe(JSON.stringify(doc));
   });
 
   it("列表只返回本人信件，非本人详情 404", async () => {
@@ -380,6 +394,34 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
       .bind(created.body.id)
       .first<{ c: number }>();
     expect(recipients!.c).toBe(0);
+  });
+
+  it("deleteLetter 显式清理收件人：外键关闭时也无孤儿行", async () => {
+    // 关闭 PRAGMA foreign_keys，模拟 D1 连接未开启级联时仍能清理干净
+    const db = new SqliteD1(undefined, false);
+    await db.prepare(
+      `INSERT INTO users (id, email, password_hash, role, is_active, approval_status, created_at, updated_at)
+       VALUES ('u1', 'a@b.c', 'h', 'user', 1, 'approved', '2026-01-01', '2026-01-01')`,
+    ).run();
+    await db.prepare(
+      `INSERT INTO letters (id, user_id, title, body_html, body_json, timezone, status, is_public, attempts, created_at, updated_at)
+       VALUES ('l1', 'u1', 't', '', '', 'Asia/Shanghai', 'draft', 0, 0, '2026-01-01', '2026-01-01')`,
+    ).run();
+    await db.prepare(
+      `INSERT INTO letter_recipients (id, letter_id, contact_id, name, email, status, created_at)
+       VALUES ('r1', 'l1', NULL, '', 'a@b.c', 'pending', '2026-01-01')`,
+    ).run();
+
+    await deleteLetter(db as unknown as D1Database, "l1");
+
+    const letterCount = await db
+      .prepare(`SELECT COUNT(*) as c FROM letters WHERE id = 'l1'`)
+      .first<{ c: number }>();
+    const recipientCount = await db
+      .prepare(`SELECT COUNT(*) as c FROM letter_recipients WHERE letter_id = 'l1'`)
+      .first<{ c: number }>();
+    expect(letterCount!.c).toBe(0);
+    expect(recipientCount!.c).toBe(0);
   });
 
   it("draft 回退：scheduled → draft；已投递/非 scheduled 被拒", async () => {
