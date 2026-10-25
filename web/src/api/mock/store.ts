@@ -35,6 +35,10 @@ export interface MockState {
   smtp: SmtpConfig;
   /** setup（GET /api/setup/state）状态：true = 尚未初始化，无任何账号。 */
   setupEnabled: boolean;
+  /** setup 页面开关（/api/admin/setup-switch）：false 时 GET /api/setup/state 返回 404。默认 ON。 */
+  setupSwitchEnabled: boolean;
+  /** db-upgrade（/api/admin/db-upgrade）被调用的次数：供单测断言按钮确实打了接口。 */
+  dbUpgradeCalls: number;
   /** 联调 mock 的初始化密钥（仅内存态；真实密钥只在部署环境的 secret 里）。 */
   setupExpectedSecret: string;
 }
@@ -103,6 +107,8 @@ export const state: MockState = {
   smtp: { ...DEFAULT_SMTP },
   // 默认 mock 场景是「已上线、已有账号」；全新部署用 seedFreshDeployment() 重置。
   setupEnabled: false,
+  setupSwitchEnabled: true,
+  dbUpgradeCalls: 0,
   setupExpectedSecret: MOCK_SETUP_SECRET,
 };
 
@@ -126,6 +132,8 @@ export function resetMockStore(): void {
   state.twofa = { totp_enabled: false, passkey_enabled: false, pendingTotpSecret: null };
   state.smtp = { ...DEFAULT_SMTP };
   state.setupEnabled = false;
+  state.setupSwitchEnabled = true;
+  state.dbUpgradeCalls = 0;
   state.setupExpectedSecret = MOCK_SETUP_SECRET;
 }
 

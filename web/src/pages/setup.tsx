@@ -6,13 +6,17 @@ import { setupApi } from "@/api/client";
 import { SetupError } from "@/api/setup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NotFoundView } from "@/components/not-found-view";
 import { useSetupStore } from "@/store/setup";
 
 // 可视化初始化页（ONE-314，契约见 ONE-313）：
 // 只填一个 SETUP_SECRET 完成初始化，不创建任何账号——初始化之后第一个通过注册页
 // 注册的用户才是管理员。密钥只进组件状态与 POST body：不写 store/localStorage、
 // 不进 URL、不回显，成功后立即清空。
-type Phase = "loading" | "form" | "closed" | "done" | "unreachable";
+//
+// ONE-320：管理员把 setup 页面开关关掉后，GET /api/setup/state 返回 404（判据），
+// 本页此时只渲染通用 404 视图（见 components/not-found-view.tsx），不吐任何初始化内容。
+type Phase = "loading" | "form" | "closed" | "done" | "unreachable" | "notfound";
 
 /** 把接口错误翻成人话：403 密钥错/已完成，500 服务端未配置密钥，其余兜底。 */
 export function describeSetupError(err: unknown): string {
@@ -27,6 +31,10 @@ export function describeSetupError(err: unknown): string {
     }
     if (err.status === 400) {
       return "提交内容无效，请刷新页面后重试。";
+    }
+    // 开关被关闭时后端对 setup 相关请求一律 404（见 ONE-320）
+    if (err.status === 404) {
+      return "初始化入口已关闭（404），请刷新页面确认。";
     }
     return `初始化失败（${err.message}），请稍后再试。`;
   }
@@ -48,7 +56,13 @@ export default function SetupPage() {
       const { enabled } = await setupApi.fetchState();
       setSetupEnabled(enabled);
       setPhase(enabled ? "form" : "closed");
-    } catch {
+    } catch (err) {
+      // setup 页面开关关闭：后端直接 404 → 整个页面呈现 404，状态也不落 store
+      if (err instanceof SetupError && err.status === 404) {
+        setSetupEnabled(null);
+        setPhase("notfound");
+        return;
+      }
       setPhase("unreachable");
     }
   }, [setSetupEnabled]);
@@ -56,6 +70,11 @@ export default function SetupPage() {
   useEffect(() => {
     void loadState();
   }, [loadState]);
+
+  // 404：不渲染初始化页的任何界面元素（标题/输入框/去处都没了）
+  if (phase === "notfound") {
+    return <NotFoundView />;
+  }
 
   const submit = async () => {
     setError(null);

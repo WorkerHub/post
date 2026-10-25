@@ -3,6 +3,10 @@
 // - POST /api/setup       body { setup_secret: string } → 200 { success: true }
 //                          403 密钥不符 / 500 服务端未配置有效的 SETUP_SECRET
 //
+// ONE-320 补充（与后端⑤ ONE-319 冻结）：管理员在设置页把 setup 页面开关关掉后，
+// GET /api/setup/state 直接返回 404（不吐任何状态信息），页面据此渲染 404 视图；
+// 开关 ON 时恢复上面的既有行为。
+//
 // 安全口径：SETUP_SECRET 只出现在用户输入与请求体里——不进 URL、不进日志、
 // 不进 localStorage、失败后立即从组件状态里清空、成功态不回显。
 
@@ -23,6 +27,7 @@ export class SetupError extends Error {
 }
 
 export interface SetupApi {
+  /** 读取初始化状态；setup 页面开关关闭时抛 SetupError(status=404)。 */
   fetchState(): Promise<SetupState>;
   /** 仅提交初始化密钥；不创建账号（首个注册用户才成为管理员）。 */
   submit(secret: string): Promise<void>;

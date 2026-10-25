@@ -1,6 +1,23 @@
-// 联调 mock：管理后台（SMTP 配置 + 测试邮件 + 用户批准/禁用/角色）。
-import type { AdminApi, AdminUser, SmtpPatch, SmtpTestResult } from "../admin";
+// 联调 mock：管理后台（SMTP 配置 + 测试邮件 + 用户批准/禁用/角色 + 系统维护）。
+import type {
+  AdminApi,
+  AdminUser,
+  DbUpgradeResult,
+  SetupSwitchState,
+  SmtpPatch,
+  SmtpTestResult,
+} from "../admin";
 import { state, toAdminUser } from "./store";
+
+/** 联调 mock 的 db-upgrade 执行摘要（真值由后端 ensureSchema 返回，此处仅形状示例）。 */
+const MOCK_DB_UPGRADE_SUMMARY: DbUpgradeResult = {
+  success: true,
+  summary: [
+    { label: "表前缀", value: "post_" },
+    { label: "执行语句数", value: "72" },
+  ],
+  message: null,
+};
 
 export const mockAdminApi: AdminApi = {
   async getSmtp() {
@@ -53,5 +70,17 @@ export const mockAdminApi: AdminApi = {
     if (!account) throw new Error("User not found");
     if (patch.role !== undefined) account.role = patch.role;
     if (patch.is_active !== undefined) account.is_active = patch.is_active;
+  },
+  async dbUpgrade(): Promise<DbUpgradeResult> {
+    state.dbUpgradeCalls += 1;
+    // ensureSchema 幂等：重复调用不改结构，摘要照回
+    return MOCK_DB_UPGRADE_SUMMARY;
+  },
+  async getSetupSwitch(): Promise<SetupSwitchState> {
+    return { enabled: state.setupSwitchEnabled };
+  },
+  async updateSetupSwitch(enabled): Promise<SetupSwitchState> {
+    state.setupSwitchEnabled = enabled;
+    return { enabled: state.setupSwitchEnabled };
   },
 };

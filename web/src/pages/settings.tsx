@@ -2,6 +2,7 @@ import { useCallback } from "react";
 
 import { settingsApi } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { MaintenanceSection } from "@/components/settings/maintenance-section";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { SecuritySection } from "@/components/settings/security-section";
 import { SmtpSection } from "@/components/settings/smtp-section";
@@ -40,6 +41,7 @@ export default function SettingsPage() {
           <>
             <SmtpSection />
             <UsersSection currentUserId={user.id} />
+            <MaintenanceSection />
           </>
         )}
       </div>
