@@ -19,6 +19,7 @@ import {
 import { getAvailable2FAMethods } from "../services/twofa";
 import { rateLimit } from "../middleware/auth";
 import { isSetupAvailable } from "../lib/setup";
+import { isRegistrationEnabled } from "../lib/registration";
 
 // 移植自 eNotify routes/auth.ts：HttpOnly Cookie + JWT 双 token（access 24h / refresh 7d）、
 // KV 会话索引/黑名单、登录防时序侧信道、限流参数全部同款。
@@ -44,9 +45,19 @@ authRoutes.use(
   rateLimit({ max: 20, window: 300, keyPrefix: "refresh" }),
 );
 
+// 公开状态接口（ONE-330 冻结契约）：供前端门控注册入口，无需登录，不套 authMiddleware。
+authRoutes.get("/registration-state", async (c) => {
+  return c.json({ enabled: await isRegistrationEnabled(c.env) });
+});
+
 // ─── register：setup 关闭后首个账号为管理员，其余 user + 待批准 ────────────────
 
 authRoutes.post("/register", async (c) => {
+  // ONE-330 冻结契约：注册开关关闭时一律 403，且优先于 setup 判定（与 setup 是否已初始化无关）。
+  if (!(await isRegistrationEnabled(c.env))) {
+    return c.json({ error: "Registration is disabled" }, 403);
+  }
+
   const body = await c.req.json<{ email: string; password: string }>();
   const email = body.email?.trim().toLowerCase();
   const password = body.password;
