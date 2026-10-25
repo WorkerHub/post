@@ -1,10 +1,11 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { Mail, Feather, Settings, Users, FileText, LogOut } from "lucide-react";
+import { Mail, Feather, Settings, ShieldCheck, Users, FileText, LogOut } from "lucide-react";
 
 import { authApi } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/auth";
 
+// 所有登录用户可见的导航项。
 const NAV_ITEMS = [
   { to: "/letters", label: "我的信件", icon: FileText },
   { to: "/compose", label: "写信", icon: Feather },
@@ -12,9 +13,14 @@ const NAV_ITEMS = [
   { to: "/settings", label: "设置", icon: Settings },
 ];
 
+// 「系统管理」仅 admin 渲染（F3 / ONE-331 冻结契约），普通用户导航里不出现。
+const ADMIN_NAV_ITEM = { to: "/admin", label: "系统管理", icon: ShieldCheck };
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const clear = useAuthStore((s) => s.clear);
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const items = isAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   const handleLogout = () => {
     // 先清后端 HttpOnly Cookie 会话，再清本地登录态（失败也照样退出本地）
@@ -31,7 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="font-serif text-lg font-semibold">时光邮局</span>
           </Link>
           <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+            {items.map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}
                 to={to}

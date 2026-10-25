@@ -109,7 +109,7 @@ export function SmtpSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>SMTP 配置（全站一套）</CardTitle>
+        <CardTitle>SMTP 配置</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">

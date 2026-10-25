@@ -1,8 +1,10 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
+import { RequireAdmin } from "@/components/require-admin";
 import { RequireAuth } from "@/components/require-auth";
 import { SessionBootstrap } from "@/components/session-bootstrap";
+import AdminPage from "@/pages/admin";
 import ContactsPage from "@/pages/contacts";
 import LettersPage from "@/pages/letters";
 import LoginPage from "@/pages/login";
@@ -18,6 +20,7 @@ const ComposePage = lazy(() => import("@/pages/compose"));
 // 路由骨架（SPEC §9）：
 // - `/` 未登录为公开信墙；登录态由 PublicWallPage 分流重定向到 `/letters` 工作台。
 // - 其余受保护页统一经 RequireAuth 守卫（未登录跳 `/login`，登录后套 AppShell）。
+// - `/admin`（系统管理）再套一层 RequireAdmin：非 admin 重定向 `/settings`（F3 / ONE-331）。
 export default function App() {
   return (
     <BrowserRouter>
@@ -33,6 +36,9 @@ export default function App() {
             <Route path="/compose/:id?" element={<ComposePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route element={<RequireAdmin />}>
+              <Route path="/admin" element={<AdminPage />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
