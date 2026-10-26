@@ -159,6 +159,12 @@ describe("设置页 · 密码确认框与验证码框语义（ONE-370）", () =>
     const codeInput = await screen.findByLabelText("六位验证码");
     expect(codeInput).toHaveAttribute("id", "otp-code");
     expect(codeInput).toHaveAttribute("name", "otp-code");
+    // 强 TOTP 信号命中（otp-code → TotpFieldNames 的 otpcode），且不含弱用户名 login / 裸 code 命名
+    expect(`${codeInput.getAttribute("id")}${codeInput.getAttribute("name")}`.replace(/-/g, "")).toContain(
+      "otpcode",
+    );
+    expect(codeInput.getAttribute("id")).not.toContain("login");
+    expect(codeInput.getAttribute("name")).not.toContain("login");
     expect(codeInput).toHaveAttribute("type", "text");
     expect(codeInput).toHaveAttribute("autocomplete", "one-time-code");
     expect(codeInput).toHaveAttribute("inputmode", "numeric");

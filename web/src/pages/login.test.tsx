@@ -375,8 +375,13 @@ describe("登录页 · 表单结构与字段语义（ONE-370）", () => {
     const codeInput = await screen.findByLabelText("六位验证码");
     expect(codeInput).toHaveAttribute("id", "otp-code");
     expect(codeInput).toHaveAttribute("name", "otp-code");
-    // id 不再含 login 词根（Bitwarden AmbiguousUsernameFieldNames 的弱 username 歧义来源）
+    // id 与 name 都不再含 login 词根（Bitwarden AmbiguousUsernameFieldNames 的弱 username 歧义来源），
+    // 且强 TOTP 信号命中（otp-code → TotpFieldNames 的 otpcode）
     expect(codeInput.getAttribute("id")).not.toContain("login");
+    expect(codeInput.getAttribute("name")).not.toContain("login");
+    expect(`${codeInput.getAttribute("id")}${codeInput.getAttribute("name")}`.replace(/-/g, "")).toContain(
+      "otpcode",
+    );
     // 属性集维持 ONE-335 后的合规态：本轮不叠加、不改动
     expect(codeInput).toHaveAttribute("type", "text");
     expect(codeInput).toHaveAttribute("autocomplete", "one-time-code");
