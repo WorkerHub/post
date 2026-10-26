@@ -139,7 +139,12 @@ export default function LoginPage() {
         {step === "credentials" ? (
           // ONE-370：凭据步骤独立成 <form>，给密码管理器一个明确的表单边界（§5B 第一信号）。
           // noValidate：保留页面自定义校验与错误提示，不让浏览器原生校验气泡拦下提交。
+          // ONE-390 方案 A：两步 form 用不同 key ⇒ 切换时 React 卸载/重挂载整棵子树。
+          // 否则两个 <form> 在同一位置同类型，React 会复用节点并原地把 type=password 的
+          // input 改写成 type=text，密码管理器对已缓存元素不重读属性，验证码框就被当成
+          // 密码框误填账户密码（§4b 红线）。零视觉变更，无新依赖。
           <form
+            key="login-credentials"
             name="login-credentials"
             className="mt-6 space-y-4"
             noValidate
@@ -203,6 +208,7 @@ export default function LoginPage() {
           // ONE-370：二次验证独立成 form，密码框在另一步骤的另一 form 内——验证码框与密码框
           // 永不共享表单边界（§5B「密码与 TOTP 分步呈现」在结构层落地）。
           <form
+            key="login-twofa"
             name="login-twofa"
             className="mt-6 space-y-4"
             noValidate
