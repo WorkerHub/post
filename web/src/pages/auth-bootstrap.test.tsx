@@ -1,12 +1,14 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { settingsApi } from "@/api/client";
+import { settingsApi, authApi } from "@/api/client";
+import { resetMockStore, state } from "@/api/mock";
 import type { MeProfile } from "@/api/settings";
 import { RequireAuth } from "@/components/require-auth";
 import { SessionBootstrap } from "@/components/session-bootstrap";
 import { useAuthStore } from "@/store/auth";
+import { useRegistrationStore } from "@/store/registration";
 
 function user(): MeProfile {
   return {
@@ -38,6 +40,8 @@ function renderHarness() {
 }
 
 beforeEach(() => {
+  resetMockStore();
+  useRegistrationStore.setState({ enabled: null });
   // 冷启动初始态：鉴权未决
   useAuthStore.setState({ isAuthenticated: false, user: null, isLoading: true });
 });
@@ -45,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   useAuthStore.setState({ isAuthenticated: false, user: null, isLoading: true });
+  useRegistrationStore.setState({ enabled: null });
 });
 
 describe("鉴权初始化竞争（刷新/书签直达受保护路由）", () => {
@@ -75,5 +80,38 @@ describe("鉴权初始化竞争（刷新/书签直达受保护路由）", () => 
     renderHarness();
 
     expect(await screen.findByText("登录页")).toBeInTheDocument();
+  });
+});
+
+// 注册开关自举（ONE-336）：SessionBootstrap 读一次 GET /api/auth/registration-state 落 store，
+// 注册页 / 登录页据此门控；读取失败保持 null（不误关门）。
+describe("注册开关自举", () => {
+  it("读到关闭：store.enabled=false（注册页与登录页随之隐藏注册入口）", async () => {
+    vi.spyOn(settingsApi, "fetchMe").mockRejectedValue(new Error("401"));
+    state.registrationEnabled = false;
+
+    renderHarness();
+
+    await waitFor(() => expect(useRegistrationStore.getState().enabled).toBe(false));
+  });
+
+  it("读到开启：store.enabled=true", async () => {
+    vi.spyOn(settingsApi, "fetchMe").mockRejectedValue(new Error("401"));
+    state.registrationEnabled = true;
+
+    renderHarness();
+
+    await waitFor(() => expect(useRegistrationStore.getState().enabled).toBe(true));
+  });
+
+  it("接口失败：保持 null，不把注册误判为关闭", async () => {
+    vi.spyOn(settingsApi, "fetchMe").mockRejectedValue(new Error("401"));
+    vi.spyOn(authApi, "getRegistrationState").mockRejectedValue(new Error("500"));
+
+    renderHarness();
+
+    expect(await screen.findByText("登录页")).toBeInTheDocument();
+    expect(authApi.getRegistrationState).toHaveBeenCalled();
+    expect(useRegistrationStore.getState().enabled).toBeNull();
   });
 });

@@ -17,6 +17,15 @@ export interface RegisterResult {
   admin: boolean;
 }
 
+/**
+ * 注册开关状态（ONE-330 冻结契约）：`enabled=true` 表示允许注册（默认开启）。
+ * 公开读口 GET /api/auth/registration-state 与管理员口 GET/POST /api/admin/registration
+ * 形状一致，统一用本类型，不各自另起一套。
+ */
+export interface RegistrationState {
+  enabled: boolean;
+}
+
 export interface AuthApi {
   login(email: string, password: string): Promise<LoginResult>;
   register(email: string, password: string): Promise<RegisterResult>;
@@ -26,6 +35,8 @@ export interface AuthApi {
   /** 登录态 Passkey：取认证 options，交浏览器 startAuthentication 后回传验证。 */
   passkeyAuthenticateOptions(tempToken: string): Promise<unknown>;
   passkeyAuthenticateVerify(tempToken: string, body: unknown): Promise<MeProfile>;
+  /** 读取公开注册开关，用于注册页 / 登录页门控注册入口（无需登录）。 */
+  getRegistrationState(): Promise<RegistrationState>;
 }
 
 async function parseError(res: Response): Promise<Error> {
@@ -119,5 +130,12 @@ export const httpAuthApi: AuthApi = {
     if (!res.ok) throw await parseError(res);
     const json = (await res.json()) as { user: MeProfile };
     return json.user;
+  },
+  async getRegistrationState() {
+    const res = await fetch("/api/auth/registration-state");
+    if (!res.ok) throw await parseError(res);
+    const body = (await res.json().catch(() => null)) as { enabled?: unknown } | null;
+    // 默认开启（后端口径：键缺失即开启），只有显式 false 才算关闭，异常形状不误关门。
+    return { enabled: body?.enabled !== false };
   },
 };

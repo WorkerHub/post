@@ -28,6 +28,10 @@ export const mockAuthApi: AuthApi = {
   },
   async register(email, password) {
     const normalized = email.trim().toLowerCase();
+    // 契约（ONE-330）：注册开关关闭时一律 403，且优先于 setup 判定
+    if (!state.registrationEnabled) {
+      throw new SetupError("Registration is disabled", 403);
+    }
     if (!EMAIL_RE.test(normalized)) throw new Error("Invalid email format");
     if (password.length < 8) throw new Error("Password must be at least 8 characters");
     // 契约（ONE-313）：setup 未初始化时注册被拒 403
@@ -82,5 +86,8 @@ export const mockAuthApi: AuthApi = {
     state.pendingLoginEmail = null;
     state.sessionEmail = account.email;
     return toMeProfile(account);
+  },
+  async getRegistrationState() {
+    return { enabled: state.registrationEnabled };
   },
 };

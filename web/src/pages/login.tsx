@@ -9,6 +9,7 @@ import type { MeProfile } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/store/auth";
+import { useRegistrationStore } from "@/store/registration";
 import { useSetupStore } from "@/store/setup";
 
 type Step = "credentials" | "twofa";
@@ -18,6 +19,8 @@ export default function LoginPage() {
   const setUser = useAuthStore((s) => s.setUser);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setupEnabled = useSetupStore((s) => s.enabled);
+  // 注册开关（ONE-336）：关闭时隐藏「注册」入口；状态未取得（null）不误隐藏。
+  const registrationEnabled = useRegistrationStore((s) => s.enabled);
 
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
@@ -175,12 +178,14 @@ export default function LoginPage() {
             <Button className="w-full" onClick={() => void submitCredentials()} disabled={busy}>
               {busy ? "登录中…" : "登录"}
             </Button>
-            <p className="text-center text-sm text-ink-600">
-              还没有账号？{" "}
-              <Link to="/register" className="text-seal-600 hover:underline">
-                注册
-              </Link>
-            </p>
+            {registrationEnabled !== false && (
+              <p className="text-center text-sm text-ink-600">
+                还没有账号？{" "}
+                <Link to="/register" className="text-seal-600 hover:underline">
+                  注册
+                </Link>
+              </p>
+            )}
           </div>
         ) : (
           <div className="mt-6 space-y-4">

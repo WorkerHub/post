@@ -6,6 +6,7 @@ import { adminApi } from "@/api/client";
 import { resetMockStore, state } from "@/api/mock";
 import type { MeProfile } from "@/api/settings";
 import { useAuthStore } from "@/store/auth";
+import { useRegistrationStore } from "@/store/registration";
 import AdminPage from "./admin";
 
 function adminUser(): MeProfile {
@@ -42,11 +43,13 @@ function rowOf(email: string): HTMLElement {
 beforeEach(() => {
   resetMockStore();
   useAuthStore.setState({ isAuthenticated: false, user: null });
+  useRegistrationStore.setState({ enabled: null });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   useAuthStore.setState({ isAuthenticated: false, user: null });
+  useRegistrationStore.setState({ enabled: null });
 });
 
 describe("系统管理页 · 三块齐备", () => {
@@ -181,5 +184,67 @@ describe("系统管理页 · 系统维护", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Forbidden");
     expect(toggle).toBeChecked();
     expect(state.setupSwitchEnabled).toBe(true);
+  });
+});
+
+// 注册开关区（ONE-336）：读 GET /api/admin/registration（默认开启），切换即 POST { enabled }。
+describe("系统管理页 · 注册开关", () => {
+  it("区块标题为「注册开关」，默认展示后端真实值：已允许注册", async () => {
+    renderAdmin();
+
+    expect(await screen.findByText("注册开关")).toBeInTheDocument();
+    const toggle = await screen.findByRole("switch", { name: "注册开关" });
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.getByText("已允许注册")).toBeInTheDocument();
+    // 与系统维护的 setup 开关是两个独立控件
+    expect(screen.getByRole("switch", { name: "setup 页面开关" })).toBeInTheDocument();
+  });
+
+  it("关闭：落库为 false、同步全局注册状态、给出提示；再开启恢复", async () => {
+    renderAdmin();
+    const toggle = await screen.findByRole("switch", { name: "注册开关" });
+    await waitFor(() => expect(toggle).toBeChecked());
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(state.registrationEnabled).toBe(false));
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText("已关闭注册")).toBeInTheDocument();
+    expect(screen.getByText(/注册已关闭：直接访问 \/register 显示/)).toBeInTheDocument();
+    // 登录页 / 注册页读的就是这个全局状态
+    expect(useRegistrationStore.getState().enabled).toBe(false);
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(state.registrationEnabled).toBe(true));
+    expect(toggle).toBeChecked();
+    expect(screen.getByText(/注册已开启/)).toBeInTheDocument();
+    expect(useRegistrationStore.getState().enabled).toBe(true);
+  });
+
+  it("读取失败：展示错误原文，开关不可操作（不猜测成开或关）", async () => {
+    vi.spyOn(adminApi, "getRegistration").mockRejectedValueOnce(new Error("Forbidden"));
+    renderAdmin();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Forbidden");
+    expect(screen.getByRole("switch", { name: "注册开关" })).toBeDisabled();
+    // 不猜测成开或关，如实显示读取失败
+    expect(screen.getByText("读取失败")).toBeInTheDocument();
+    expect(screen.queryByText("已允许注册")).not.toBeInTheDocument();
+    expect(screen.queryByText("已关闭注册")).not.toBeInTheDocument();
+  });
+
+  it("写入失败：开关不误翻、展示错误原文、后端值不变", async () => {
+    vi.spyOn(adminApi, "updateRegistration").mockRejectedValueOnce(new Error("Internal error"));
+    renderAdmin();
+    const toggle = await screen.findByRole("switch", { name: "注册开关" });
+    await waitFor(() => expect(toggle).toBeChecked());
+
+    fireEvent.click(toggle);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Internal error");
+    expect(toggle).toBeChecked();
+    expect(state.registrationEnabled).toBe(true);
+    expect(useRegistrationStore.getState().enabled).toBe(true);
   });
 });

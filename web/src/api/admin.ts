@@ -6,6 +6,10 @@
 //   POST /api/admin/db-upgrade → 200 {success:true, ...摘要}；不属于契约的键按摘要展示。
 //   GET/POST /api/admin/setup-switch → {enabled:boolean}，POST body 只有 {enabled}。
 //   开关 OFF 时 GET /api/setup/state 返回 404（见 api/setup.ts 与 pages/setup.tsx）。
+// - 注册开关（ONE-336，消费 B1 / ONE-330 冻结契约，不得私改形状）：
+//   GET/POST /api/admin/registration → {enabled:boolean}，POST body 只有 {enabled}；
+//   默认开启，关闭后 POST /api/auth/register 一律 403（前端门控见 pages/register.tsx）。
+import type { RegistrationState } from "./auth";
 import type { Role } from "./settings";
 
 /** GET /api/admin/users 返回的管理员视角用户（复用 publicUser 形状）。 */
@@ -104,6 +108,10 @@ export interface AdminApi {
   getSetupSwitch(): Promise<SetupSwitchState>;
   /** 写入 setup 页面开关；返回后端确认后的生效值。 */
   updateSetupSwitch(enabled: boolean): Promise<SetupSwitchState>;
+  /** 读取注册开关（ONE-330 冻结契约，默认开启）。 */
+  getRegistration(): Promise<RegistrationState>;
+  /** 写入注册开关（body 只有 { enabled }），返回后端确认后的生效值。 */
+  updateRegistration(enabled: boolean): Promise<RegistrationState>;
 }
 
 async function parseError(res: Response): Promise<Error> {
@@ -189,6 +197,24 @@ export const httpAdminApi: AdminApi = {
   },
   async updateSetupSwitch(enabled) {
     const res = await fetch("/api/admin/setup-switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw await parseError(res);
+    const body = (await res.json().catch(() => null)) as { enabled?: boolean } | null;
+    // 契约 {success:true, enabled}；若后端漏回 enabled，以请求值为准，避免开关回弹到错值
+    return { enabled: typeof body?.enabled === "boolean" ? body.enabled : enabled };
+  },
+  async getRegistration() {
+    const res = await fetch("/api/admin/registration");
+    if (!res.ok) throw await parseError(res);
+    const body = (await res.json().catch(() => null)) as { enabled?: unknown } | null;
+    // 后端默认开启：只有显式 false 才按关闭处理
+    return { enabled: body?.enabled !== false };
+  },
+  async updateRegistration(enabled) {
+    const res = await fetch("/api/admin/registration", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),

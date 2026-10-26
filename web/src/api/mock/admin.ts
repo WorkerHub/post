@@ -7,6 +7,7 @@ import type {
   SmtpPatch,
   SmtpTestResult,
 } from "../admin";
+import type { RegistrationState } from "../auth";
 import { state, toAdminUser } from "./store";
 
 /** 联调 mock 的 db-upgrade 执行摘要（真值由后端 ensureSchema 返回，此处仅形状示例）。 */
@@ -82,5 +83,12 @@ export const mockAdminApi: AdminApi = {
   async updateSetupSwitch(enabled): Promise<SetupSwitchState> {
     state.setupSwitchEnabled = enabled;
     return { enabled: state.setupSwitchEnabled };
+  },
+  async getRegistration(): Promise<RegistrationState> {
+    return { enabled: state.registrationEnabled };
+  },
+  async updateRegistration(enabled): Promise<RegistrationState> {
+    state.registrationEnabled = enabled;
+    return { enabled: state.registrationEnabled };
   },
 };
