@@ -326,6 +326,96 @@ describe("登录页 · 注册入口门控（ONE-336）", () => {
   });
 });
 
+// ONE-390：§4b 红线复发的真实根因——凭据步→验证码步切换时，React 把同一个 <input> DOM 节点
+// 原地改写（type=password → type=text）。密码管理器以「元素」为键缓存字段判定，已缓存的
+// 元素不会重读属性，于是验证码框被永久当作密码框，账户密码被填进验证码框。
+// 因此本组断言以「节点是否被重建」为准，属性断言只作辅助——节点复用时 React 照样会把
+// type/autocomplete 改成合规值，单看属性永远发现不了这个 bug。
+function makeElementKeyedClassifier() {
+  // 复刻 Bitwarden inline-menu-field-qualification 的缓存语义：以元素为键、命中即不重读。
+  const cache = new WeakMap<Element, "password" | "otp">();
+  return {
+    cache,
+    qualify(el: Element) {
+      const cached = cache.get(el);
+      if (cached) return cached;
+      const verdict: "password" | "otp" =
+        el.getAttribute("type") === "password" ? "password" : "otp";
+      cache.set(el, verdict);
+      return verdict;
+    },
+  };
+}
+
+describe("登录页 · 二步切换强制重挂载（ONE-390 方案 A）", () => {
+  async function goToTwofaStep() {
+    const adminPw = state.accounts.find((a) => a.email === "admin@example.com")!.password;
+    const view = renderLogin();
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: adminPw } });
+    const passwordNode = screen.getByLabelText("密码");
+    const credentialsForm = passwordNode.closest("form")!;
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    const codeInput = await screen.findByLabelText("六位验证码");
+    return { view, passwordNode, credentialsForm, codeInput };
+  }
+
+  it("切到验证码步骤：验证码 input 与 form 都是新 DOM 节点，旧的密码节点已脱离文档", async () => {
+    state.twofa.totp_enabled = true;
+    const { passwordNode, credentialsForm, codeInput } = await goToTwofaStep();
+
+    // 核心断言：节点身份不同 ⇒ React 卸载后重挂载，而非原地改写同一个 input。
+    expect(codeInput).not.toBe(passwordNode);
+    expect(codeInput.closest("form")).not.toBe(credentialsForm);
+
+    // 旧节点已被卸载出文档（节点复用时旧引用就是新节点，isConnected 仍为 true）。
+    expect(passwordNode.isConnected).toBe(false);
+    expect(credentialsForm.isConnected).toBe(false);
+    expect(codeInput.isConnected).toBe(true);
+
+    // 辅助断言：新节点本身不携带任何密码语义。
+    expect(codeInput.getAttribute("type")).toBe("text");
+    expect(codeInput.getAttribute("autocomplete")).toBe("one-time-code");
+    expect(codeInput.getAttribute("autocomplete")).not.toBe("current-password");
+    expect(codeInput.closest("form")!.querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it("以元素为键的密码管理器缓存：验证码框是缓存未命中的新元素，归类为 otp 而非 password", async () => {
+    state.twofa.totp_enabled = true;
+    const classifier = makeElementKeyedClassifier();
+    const adminPw = state.accounts.find((a) => a.email === "admin@example.com")!.password;
+    renderLogin();
+
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: adminPw } });
+    const passwordNode = screen.getByLabelText("密码");
+    // 密码管理器在凭据步骤采集并缓存了该元素的判定。
+    expect(classifier.qualify(passwordNode)).toBe("password");
+
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    const codeInput = await screen.findByLabelText("六位验证码");
+
+    // 缓存未命中 ⇒ 是新元素；随后按 type=text 正确归为 otp。
+    // 修复前（节点复用）这里必然命中旧缓存，返回 "password"——就是线上误填的直接机制。
+    expect(classifier.cache.has(codeInput)).toBe(false);
+    expect(classifier.qualify(codeInput)).toBe("otp");
+  });
+
+  it("返回账号密码登录：凭据 input 同样是重挂载的新节点，不复用验证码节点", async () => {
+    state.twofa.totp_enabled = true;
+    const { passwordNode, codeInput } = await goToTwofaStep();
+
+    fireEvent.click(screen.getByRole("button", { name: /返回账号密码登录/ }));
+
+    const passwordAgain = await screen.findByLabelText("密码");
+    expect(passwordAgain).not.toBe(codeInput);
+    expect(passwordAgain).not.toBe(passwordNode);
+    expect(codeInput.isConnected).toBe(false);
+    expect(passwordAgain.getAttribute("type")).toBe("password");
+    expect(passwordAgain.getAttribute("autocomplete")).toBe("current-password");
+  });
+});
+
 // ONE-370：§5B 全信号集落地——凭据步骤与二次验证步骤各自独立 <form>，
 // 凭证字段补齐 name（第二信号），验证码框 id 去掉 login 词根（消除 username 弱匹配歧义）。
 describe("登录页 · 表单结构与字段语义（ONE-370）", () => {
