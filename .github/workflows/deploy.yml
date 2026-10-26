@@ -21,6 +21,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Mask resource IDs
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          for v in D1_DATABASE_ID KV_NAMESPACE_ID CLOUDFLARE_ACCOUNT_ID; do
+            if [ -n "${!v}" ]; then echo "::add-mask::${!v}"; fi
+          done
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
