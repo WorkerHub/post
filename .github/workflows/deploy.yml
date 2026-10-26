@@ -21,16 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Mask resource IDs
-        env:
-          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
-          KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          for v in D1_DATABASE_ID KV_NAMESPACE_ID CLOUDFLARE_ACCOUNT_ID; do
-            if [ -n "${!v}" ]; then echo "::add-mask::${!v}"; fi
-          done
-
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
@@ -48,10 +38,10 @@ jobs:
       - name: Patch wrangler.toml
         working-directory: worker
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
-          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
-          KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
           TABLE_PREFIX: ${{ vars.TABLE_PREFIX }}
         run: |
           APP_VERSION="$(node -p "require('../package.json').version")" \
