@@ -126,13 +126,24 @@ export default function RegisterPage() {
         )}
 
         {done === null && (
-          <div className="mt-6 space-y-4">
+          // ONE-370：注册表单独立成 <form>（§5B 第一信号），邮箱 + 密码 + 确认密码同属这一个 form；
+          // noValidate 保留页面自定义校验文案。
+          <form
+            name="register"
+            className="mt-6 space-y-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+          >
             <div>
               <label htmlFor="reg-email" className="mb-1.5 block text-sm font-medium text-ink-700">
                 邮箱
               </label>
               <Input
                 id="reg-email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -146,6 +157,7 @@ export default function RegisterPage() {
               </label>
               <Input
                 id="reg-password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -159,6 +171,7 @@ export default function RegisterPage() {
               </label>
               <Input
                 id="reg-confirm"
+                name="confirm-password"
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
@@ -177,7 +190,7 @@ export default function RegisterPage() {
                 {error}
               </p>
             )}
-            <Button className="w-full" onClick={() => void submit()} disabled={busy}>
+            <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "注册中…" : "注册"}
             </Button>
             <p className="text-center text-sm text-ink-600">
@@ -189,7 +202,7 @@ export default function RegisterPage() {
             <p className="text-center text-xs text-ink-500">
               第一个注册的账号将成为管理员；之后的账号需管理员批准后才能登录。
             </p>
-          </div>
+          </form>
         )}
 
         <p className="mt-8 text-center text-xs text-ink-500">

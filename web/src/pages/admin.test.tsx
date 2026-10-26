@@ -248,3 +248,44 @@ describe("系统管理页 · 注册开关", () => {
     expect(useRegistrationStore.getState().enabled).toBe(true);
   });
 });
+
+// ONE-370：SMTP 区块专属 form；密码框 autoComplete 定死 off（非 current-password / new-password），
+// name="smtp_password"；用户名同步 off；测试邮件独立 form，不与密码框同 form。
+describe("系统管理页 · SMTP 表单语义（ONE-370）", () => {
+  it("SMTP 密码框：off / smtp_password，且在专属 form 内独此一个密码框", async () => {
+    renderAdmin();
+    await screen.findByText("SMTP 配置");
+
+    const passwordInput = screen.getByLabelText("密码");
+    expect(passwordInput).toHaveAttribute("type", "password");
+    expect(passwordInput).toHaveAttribute("name", "smtp_password");
+    expect(passwordInput).toHaveAttribute("autocomplete", "off");
+    expect(passwordInput.getAttribute("autocomplete")).not.toBe("current-password");
+    expect(passwordInput.getAttribute("autocomplete")).not.toBe("new-password");
+
+    const form = passwordInput.closest("form");
+    expect(form).toHaveAttribute("name", "smtp-config");
+    expect(form!.querySelectorAll('input[type="password"]').length).toBe(1);
+    expect(form!.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+    expect(screen.getByRole("button", { name: /保存配置/ })).toHaveAttribute("type", "submit");
+  });
+
+  it("SMTP 其余字段带 name 与 off；测试邮件在独立 form 内且不含密码框", async () => {
+    const { container } = renderAdmin();
+    await screen.findByText("SMTP 配置");
+
+    const usernameInput = screen.getByLabelText("用户名");
+    expect(usernameInput).toHaveAttribute("name", "smtp_username");
+    expect(usernameInput).toHaveAttribute("autocomplete", "off");
+
+    expect(screen.getByLabelText("服务器地址")).toHaveAttribute("name", "smtp_host");
+    expect(screen.getByLabelText("端口")).toHaveAttribute("name", "smtp_port");
+    expect(screen.getByLabelText("发件邮箱")).toHaveAttribute("name", "smtp_from");
+    expect(screen.getByLabelText("发件人名称")).toHaveAttribute("name", "smtp_from_name");
+
+    const testForm = container.querySelector('form[name="smtp-test"]');
+    expect(testForm).not.toBeNull();
+    expect(testForm!.contains(screen.getByLabelText("测试收件邮箱"))).toBe(true);
+    expect(testForm!.querySelector('input[type="password"]')).toBeNull();
+  });
+});

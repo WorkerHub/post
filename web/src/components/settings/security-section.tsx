@@ -66,32 +66,58 @@ function PasswordDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>请先输入账户密码确认身份。</DialogDescription>
-        </DialogHeader>
-        <div className="mt-4">
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="账户密码"
-            aria-label="账户密码"
-          />
-          {error && (
-            <p role="alert" className="mt-2 rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">
-              {error}
-            </p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            取消
-          </Button>
-          <Button onClick={submit} disabled={busy || !password}>
-            {busy ? "处理中…" : "确认"}
-          </Button>
-        </DialogFooter>
+        {/* ONE-370：密码确认框独立成 <form>（§5B 第一信号），且不与任何验证码框 / SMTP 密码框同 form。
+            noValidate 保留页面自己的错误文案，不让浏览器原生校验气泡拦下提交。 */}
+        <form
+          name="password-confirm"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>请先输入账户密码确认身份。</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <label
+              htmlFor="account-password"
+              className="mb-1.5 block text-sm font-medium text-ink-700"
+            >
+              账户密码
+            </label>
+            {/* ONE-370：补齐密码框三信号——id + name="password" + current-password，
+                并用 label[htmlFor] 建立显式文本关联（评审 must-fix 3）。 */}
+            <Input
+              id="account-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="账户密码"
+            />
+            {error && (
+              <p role="alert" className="mt-2 rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">
+                {error}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+            >
+              取消
+            </Button>
+            <Button type="submit" disabled={busy || !password}>
+              {busy ? "处理中…" : "确认"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -252,64 +278,82 @@ export function SecuritySection({
       {/* TOTP 开通对话框 */}
       <Dialog open={totpDialogOpen} onOpenChange={setTotpDialogOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>开启 TOTP</DialogTitle>
-            <DialogDescription>
-              用验证器应用扫描二维码，或手动输入密钥，再填入应用生成的六位验证码。
-            </DialogDescription>
-          </DialogHeader>
-          {busy && !setup ? (
-            <div className="my-6 text-center text-sm text-ink-500">正在生成密钥…</div>
-          ) : setup ? (
-            <div className="mt-4 space-y-4">
-              <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
-                <TotpQr uri={setup.uri} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-ink-700">手动输入密钥</p>
-                  <code className="mt-1 block break-all rounded-md bg-paper-100 px-3 py-2 text-xs text-ink-700">
-                    {setup.secret}
-                  </code>
+          {/* ONE-370：开启 TOTP 也是一个独立 <form>，form 内只有验证码框、没有密码框（§5B 分表单）。 */}
+          <form
+            name="totp-enable"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void enableTotp();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>开启 TOTP</DialogTitle>
+              <DialogDescription>
+                用验证器应用扫描二维码，或手动输入密钥，再填入应用生成的六位验证码。
+              </DialogDescription>
+            </DialogHeader>
+            {busy && !setup ? (
+              <div className="my-6 text-center text-sm text-ink-500">正在生成密钥…</div>
+            ) : setup ? (
+              <div className="mt-4 space-y-4">
+                <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+                  <TotpQr uri={setup.uri} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-ink-700">手动输入密钥</p>
+                    <code className="mt-1 block break-all rounded-md bg-paper-100 px-3 py-2 text-xs text-ink-700">
+                      {setup.secret}
+                    </code>
+                  </div>
                 </div>
+                <div>
+                  <label htmlFor="otp-code" className="mb-1.5 block text-sm font-medium text-ink-700">
+                    六位验证码
+                  </label>
+                  {/* 属性集保持 ONE-335 后的合规态（text / one-time-code / numeric / 单框 / maxLength=6）；
+                      本次只改 id 与 name（统一 otp-code，与登录二步保持一致）。 */}
+                  <Input
+                    id="otp-code"
+                    name="otp-code"
+                    type="text"
+                    autoComplete="one-time-code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="000000"
+                    inputMode="numeric"
+                    maxLength={6}
+                  />
+                </div>
+                {error && (
+                  <p role="alert" className="rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">
+                    {error}
+                  </p>
+                )}
+                {notice && (
+                  <p className="rounded-md border border-paper-300 bg-paper-100 px-3 py-2 text-sm text-ink-700">
+                    {notice}
+                  </p>
+                )}
               </div>
-              <div>
-                <label htmlFor="totp-code" className="mb-1.5 block text-sm font-medium text-ink-700">
-                  六位验证码
-                </label>
-                <Input
-                  id="totp-code"
-                  type="text"
-                  autoComplete="one-time-code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="000000"
-                  inputMode="numeric"
-                  maxLength={6}
-                />
-              </div>
-              {error && (
-                <p role="alert" className="rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">
-                  {error}
-                </p>
-              )}
-              {notice && (
-                <p className="rounded-md border border-paper-300 bg-paper-100 px-3 py-2 text-sm text-ink-700">
-                  {notice}
-                </p>
-              )}
-            </div>
-          ) : (
-            <p role="alert" className="mt-4 rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">
-              {error}
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTotpDialogOpen(false)} disabled={busy}>
-              取消
-            </Button>
-            <Button onClick={() => void enableTotp()} disabled={busy || !setup || code.length < 6}>
-              验证并开启
-            </Button>
-          </DialogFooter>
+            ) : (
+              <p role="alert" className="mt-4 rounded-md border border-seal-500/30 bg-seal-500/10 px-3 py-2 text-sm text-seal-600">
+                {error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTotpDialogOpen(false)}
+                disabled={busy}
+              >
+                取消
+              </Button>
+              <Button type="submit" disabled={busy || !setup || code.length < 6}>
+                验证并开启
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

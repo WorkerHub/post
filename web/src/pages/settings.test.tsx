@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -99,5 +99,79 @@ describe("设置页 · 只有个人资料与安全", () => {
 
     expect(screen.getByText("正在加载账户信息…")).toBeInTheDocument();
     expect(screen.queryByText("个人资料")).not.toBeInTheDocument();
+  });
+});
+
+// ONE-370：PasswordDialog 补齐密码框三信号（id / name / current-password）+ label 显式关联，
+// 且密码确认框不与任何验证码框同 form；验证码框改成 id/name=otp-code 后仍保持现行 OTP 属性集。
+describe("设置页 · 密码确认框与验证码框语义（ONE-370）", () => {
+  function totpEnabledUser(): MeProfile {
+    return {
+      ...baseUser(),
+      twofa: { totp_enabled: true, passkey_enabled: false, preferred_method: null },
+    };
+  }
+
+  it("PasswordDialog：id/name/type/autocomplete 齐全，label[htmlFor] 显式关联，独立 form 内无验证码框", async () => {
+    state.sessionEmail = "admin@example.com";
+    renderSettings(totpEnabledUser());
+    await screen.findByText("TOTP 验证码");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    // 能按可见文本「账户密码」取到输入框，即证明 label[htmlFor] 关联成立（评审 must-fix 3）
+    const passwordInput = await screen.findByLabelText("账户密码");
+    expect(passwordInput).toHaveAttribute("id", "account-password");
+    expect(passwordInput).toHaveAttribute("name", "password");
+    expect(passwordInput).toHaveAttribute("type", "password");
+    expect(passwordInput).toHaveAttribute("autocomplete", "current-password");
+
+    const form = passwordInput.closest("form");
+    expect(form).toHaveAttribute("name", "password-confirm");
+    expect(form!.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "确认" })).toHaveAttribute("type", "submit");
+  });
+
+  it("原生 form 提交被 onSubmit 接住：PasswordDialog 内的 form 提交不刷新页面、走异步确认", async () => {
+    state.sessionEmail = "admin@example.com";
+    renderSettings(totpEnabledUser());
+    await screen.findByText("TOTP 验证码");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    const passwordInput = await screen.findByLabelText("账户密码");
+    fireEvent.change(passwordInput, {
+      target: { value: state.accounts.find((a) => a.email === "admin@example.com")!.password },
+    });
+
+    fireEvent.submit(passwordInput.closest("form")!);
+
+    // 关闭成功后 dialog 关闭、TOTP 徽标回到「未开启」
+    await waitFor(() => expect(screen.queryByLabelText("账户密码")).not.toBeInTheDocument());
+  });
+
+  it("开启 TOTP 对话框：验证码框 id/name=otp-code，所在 form 内无密码框", async () => {
+    state.sessionEmail = "admin@example.com";
+    renderSettings(baseUser());
+    await screen.findByText("TOTP 验证码");
+
+    fireEvent.click(screen.getByRole("button", { name: "开启" }));
+
+    const codeInput = await screen.findByLabelText("六位验证码");
+    expect(codeInput).toHaveAttribute("id", "otp-code");
+    expect(codeInput).toHaveAttribute("name", "otp-code");
+    // 强 TOTP 信号命中（otp-code → TotpFieldNames 的 otpcode），且不含弱用户名 login / 裸 code 命名
+    expect(`${codeInput.getAttribute("id")}${codeInput.getAttribute("name")}`.replace(/-/g, "")).toContain(
+      "otpcode",
+    );
+    expect(codeInput.getAttribute("id")).not.toContain("login");
+    expect(codeInput.getAttribute("name")).not.toContain("login");
+    expect(codeInput).toHaveAttribute("type", "text");
+    expect(codeInput).toHaveAttribute("autocomplete", "one-time-code");
+    expect(codeInput).toHaveAttribute("inputmode", "numeric");
+    expect(codeInput).toHaveAttribute("maxlength", "6");
+
+    const form = codeInput.closest("form");
+    expect(form).toHaveAttribute("name", "totp-enable");
+    expect(form!.querySelector('input[type="password"]')).toBeNull();
   });
 });

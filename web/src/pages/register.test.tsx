@@ -94,3 +94,44 @@ describe("注册页 · 注册开关门控（ONE-336）", () => {
     expect(state.accounts.some((a) => a.email === "name+tag@example.co.uk")).toBe(false);
   });
 });
+
+// ONE-370：注册表单独立成 <form>，三个凭证字段补齐 name（§5B 第二信号）。
+describe("注册页 · 表单结构与字段语义（ONE-370）", () => {
+  it("注册表单：独立 form + 三个字段 name/autocomplete + submit 按钮", () => {
+    const { container } = renderRegister();
+
+    const form = container.querySelector('form[name="register"]');
+    expect(form).not.toBeNull();
+
+    const emailInput = screen.getByLabelText("邮箱");
+    expect(emailInput).toHaveAttribute("name", "email");
+    expect(emailInput).toHaveAttribute("type", "email");
+    expect(emailInput).toHaveAttribute("autocomplete", "email");
+
+    const passwordInput = screen.getByLabelText("密码");
+    expect(passwordInput).toHaveAttribute("name", "password");
+    expect(passwordInput).toHaveAttribute("type", "password");
+    expect(passwordInput).toHaveAttribute("autocomplete", "new-password");
+
+    const confirmInput = screen.getByLabelText("确认密码");
+    expect(confirmInput).toHaveAttribute("name", "confirm-password");
+    expect(confirmInput).toHaveAttribute("autocomplete", "new-password");
+
+    for (const input of [emailInput, passwordInput, confirmInput]) {
+      expect(form!.contains(input)).toBe(true);
+    }
+    expect(form!.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "注册" })).toHaveAttribute("type", "submit");
+  });
+
+  it("原生 form 提交被 onSubmit 接住：注册成功提示出现，页面不刷新", async () => {
+    const { container } = renderRegister();
+
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "name+tag@example.co.uk" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "newpass123" } });
+    fireEvent.change(screen.getByLabelText("确认密码"), { target: { value: "newpass123" } });
+    fireEvent.submit(container.querySelector('form[name="register"]')!);
+
+    expect(await screen.findByText(/等待管理员批准/)).toBeInTheDocument();
+  });
+});

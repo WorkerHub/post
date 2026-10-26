@@ -69,6 +69,8 @@ export function ProfileSection({
           </label>
           <Input
             id="display-name"
+            name="display_name"
+            autoComplete="off"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="留空则显示「一位朋友」"
