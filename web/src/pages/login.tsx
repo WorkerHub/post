@@ -137,13 +137,24 @@ export default function LoginPage() {
         </div>
 
         {step === "credentials" ? (
-          <div className="mt-6 space-y-4">
+          // ONE-370：凭据步骤独立成 <form>，给密码管理器一个明确的表单边界（§5B 第一信号）。
+          // noValidate：保留页面自定义校验与错误提示，不让浏览器原生校验气泡拦下提交。
+          <form
+            name="login-credentials"
+            className="mt-6 space-y-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitCredentials();
+            }}
+          >
             <div>
               <label htmlFor="login-email" className="mb-1.5 block text-sm font-medium text-ink-700">
                 邮箱
               </label>
               <Input
                 id="login-email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -157,6 +168,7 @@ export default function LoginPage() {
               </label>
               <Input
                 id="login-password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -175,7 +187,7 @@ export default function LoginPage() {
                 {error}
               </p>
             )}
-            <Button className="w-full" onClick={() => void submitCredentials()} disabled={busy}>
+            <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "登录中…" : "登录"}
             </Button>
             {registrationEnabled !== false && (
@@ -186,19 +198,33 @@ export default function LoginPage() {
                 </Link>
               </p>
             )}
-          </div>
+          </form>
         ) : (
-          <div className="mt-6 space-y-4">
+          // ONE-370：二次验证独立成 form，密码框在另一步骤的另一 form 内——验证码框与密码框
+          // 永不共享表单边界（§5B「密码与 TOTP 分步呈现」在结构层落地）。
+          <form
+            name="login-twofa"
+            className="mt-6 space-y-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitTotp();
+            }}
+          >
             <p className="text-sm text-ink-600">
               该账号开启了双重验证，请完成以下验证。
             </p>
             {methods.includes("totp") && (
               <div>
-                <label htmlFor="login-code" className="mb-1.5 block text-sm font-medium text-ink-700">
+                <label htmlFor="otp-code" className="mb-1.5 block text-sm font-medium text-ink-700">
                   六位验证码
                 </label>
+                {/* 属性集保持 ONE-335 后的合规态（text / one-time-code / numeric / 单框 / maxLength=6）；
+                    本次只改 id 与 name：去掉 id 里的 `login` 词根，消除 Bitwarden
+                    AmbiguousUsernameFieldNames 的弱 username 歧义（ONE-368 §5 第 5 条 + 评审 nit 2）。 */}
                 <Input
-                  id="login-code"
+                  id="otp-code"
+                  name="otp-code"
                   type="text"
                   autoComplete="one-time-code"
                   value={code}
@@ -213,11 +239,7 @@ export default function LoginPage() {
                     }
                   }}
                 />
-                <Button
-                  className="mt-3 w-full"
-                  onClick={() => void submitTotp()}
-                  disabled={busy}
-                >
+                <Button type="submit" className="mt-3 w-full" disabled={busy}>
                   <ShieldCheck className="size-4" />
                   {busy ? "验证中…" : "验证"}
                 </Button>
@@ -225,6 +247,7 @@ export default function LoginPage() {
             )}
             {methods.includes("passkey") && (
               <Button
+                type="button"
                 variant="outline"
                 className="w-full"
                 onClick={() => void submitPasskey()}
@@ -247,7 +270,7 @@ export default function LoginPage() {
               <ArrowLeft className="size-3.5" />
               返回账号密码登录
             </button>
-          </div>
+          </form>
         )}
 
         <p className="mt-8 text-center text-xs text-ink-500">

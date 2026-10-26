@@ -325,3 +325,67 @@ describe("登录页 · 注册入口门控（ONE-336）", () => {
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 });
+
+// ONE-370：§5B 全信号集落地——凭据步骤与二次验证步骤各自独立 <form>，
+// 凭证字段补齐 name（第二信号），验证码框 id 去掉 login 词根（消除 username 弱匹配歧义）。
+describe("登录页 · 表单结构与字段语义（ONE-370）", () => {
+  it("凭据步骤：独立 form + 邮箱/密码带 name，提交按钮为 submit", () => {
+    const { container } = renderLogin();
+
+    const form = container.querySelector('form[name="login-credentials"]');
+    expect(form).not.toBeNull();
+
+    const emailInput = screen.getByLabelText("邮箱");
+    expect(emailInput).toHaveAttribute("name", "email");
+    expect(emailInput).toHaveAttribute("type", "email");
+    expect(emailInput).toHaveAttribute("autocomplete", "email");
+    expect(form!.contains(emailInput)).toBe(true);
+
+    const passwordInput = screen.getByLabelText("密码");
+    expect(passwordInput).toHaveAttribute("name", "password");
+    expect(passwordInput).toHaveAttribute("type", "password");
+    expect(passwordInput).toHaveAttribute("autocomplete", "current-password");
+    expect(form!.contains(passwordInput)).toBe(true);
+
+    // 密码框与验证码框不共 form：凭据步骤的 form 内没有 one-time-code 字段
+    expect(form!.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "登录" })).toHaveAttribute("type", "submit");
+  });
+
+  it("凭据步骤：原生 form 提交被 onSubmit 接住，不刷新页面即完成登录", async () => {
+    const adminPw = state.accounts.find((a) => a.email === "admin@example.com")!.password;
+    const { container } = renderLogin();
+
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: adminPw } });
+    fireEvent.submit(container.querySelector('form[name="login-credentials"]')!);
+
+    expect(await screen.findByText("工作台占位")).toBeInTheDocument();
+  });
+
+  it("二次验证步骤：验证码框 id/name 统一 otp-code，所在 form 内无密码框", async () => {
+    state.twofa.totp_enabled = true;
+    const adminPw = state.accounts.find((a) => a.email === "admin@example.com")!.password;
+    renderLogin();
+
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: adminPw } });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    const codeInput = await screen.findByLabelText("六位验证码");
+    expect(codeInput).toHaveAttribute("id", "otp-code");
+    expect(codeInput).toHaveAttribute("name", "otp-code");
+    // id 不再含 login 词根（Bitwarden AmbiguousUsernameFieldNames 的弱 username 歧义来源）
+    expect(codeInput.getAttribute("id")).not.toContain("login");
+    // 属性集维持 ONE-335 后的合规态：本轮不叠加、不改动
+    expect(codeInput).toHaveAttribute("type", "text");
+    expect(codeInput).toHaveAttribute("autocomplete", "one-time-code");
+    expect(codeInput).toHaveAttribute("inputmode", "numeric");
+    expect(codeInput).toHaveAttribute("maxlength", "6");
+
+    const form = codeInput.closest("form");
+    expect(form).toHaveAttribute("name", "login-twofa");
+    expect(form!.querySelector('input[type="password"]')).toBeNull();
+    expect(screen.getByRole("button", { name: /验证/ })).toHaveAttribute("type", "submit");
+  });
+});
