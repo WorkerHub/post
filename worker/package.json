@@ -1,5 +1,5 @@
 {
-  "name": "@post/worker",
+  "name": "@someday/worker",
   "private": true,
   "type": "module",
   "scripts": {
