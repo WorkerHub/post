@@ -9,7 +9,7 @@ export async function generateTOTPSecret(
   const bytes = new Uint8Array(20);
   crypto.getRandomValues(bytes);
   const secret = base32Encode(bytes);
-  const uri = `otpauth://totp/post:${encodeURIComponent(email)}?secret=${secret}&issuer=post&algorithm=SHA1&digits=6&period=30`;
+  const uri = `otpauth://totp/someday:${encodeURIComponent(email)}?secret=${secret}&issuer=someday&algorithm=SHA1&digits=6&period=30`;
   return { secret, uri };
 }
 

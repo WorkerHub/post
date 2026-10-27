@@ -1,18 +1,18 @@
 {
-  "name": "post",
+  "name": "someday",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "时光邮局 — 在未来某个日期时间，把一封信寄到指定邮箱（post.oneboy.app）",
+  "description": "时光邮局 — 在未来某个日期时间，把一封信寄到指定邮箱（someday.oneboy.app）",
   "scripts": {
     "dev": "concurrently \"pnpm dev:worker\" \"pnpm dev:web\"",
-    "dev:web": "pnpm --filter @post/web dev",
-    "dev:worker": "pnpm --filter @post/worker dev",
-    "build": "pnpm --filter @post/web build && pnpm --filter @post/worker build",
-    "build:web": "pnpm --filter @post/web build",
-    "build:worker": "pnpm --filter @post/worker build",
-    "typecheck": "pnpm --filter @post/web typecheck && pnpm --filter @post/worker typecheck",
-    "test": "pnpm --filter @post/web test && pnpm --filter @post/worker test",
+    "dev:web": "pnpm --filter @someday/web dev",
+    "dev:worker": "pnpm --filter @someday/worker dev",
+    "build": "pnpm --filter @someday/web build && pnpm --filter @someday/worker build",
+    "build:web": "pnpm --filter @someday/web build",
+    "build:worker": "pnpm --filter @someday/worker build",
+    "typecheck": "pnpm --filter @someday/web typecheck && pnpm --filter @someday/worker typecheck",
+    "test": "pnpm --filter @someday/web test && pnpm --filter @someday/worker test",
     "deploy": "pnpm build:web && node scripts/deploy.mjs"
   },
   "devDependencies": {

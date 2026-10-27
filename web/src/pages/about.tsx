@@ -19,7 +19,7 @@ import { APP_BUILD_TIME, APP_VERSION } from "@/lib/version";
 // 不在本页写死；产品名与 web/index.html 的 <title> 文案保持一致。
 export const PRODUCT_NAME = "时光邮局";
 export const PRODUCT_TAGLINE = "小圈子多用户的定时寄信服务";
-export const REPO_URL = "https://github.com/WorkerHub/post";
+export const REPO_URL = "https://github.com/WorkerHub/someday";
 
 const INTRO =
   "写下想说的话，挑一个未来的日期，到那天它会自动寄到对方的邮箱。信可以只寄给指定的人，也可以公开到信墙，让路过的人一起读。";
@@ -160,7 +160,7 @@ export default function AboutPage() {
                 className="mt-3 inline-flex items-center gap-1.5 text-sm text-seal-600 underline-offset-4 hover:underline"
               >
                 <ExternalLink className="size-4" />
-                github.com/WorkerHub/post
+                github.com/WorkerHub/someday
               </a>
             </CardContent>
           </Card>

@@ -73,12 +73,12 @@ describe("关于页内容族（ONE-337）", () => {
     expect(screen.getByText(/Zustand/)).toBeInTheDocument();
   });
 
-  it("开源地址固定为 WorkerHub/post，外链新开页并带 noopener", () => {
+  it("开源地址固定为 WorkerHub/someday，外链新开页并带 noopener", () => {
     renderAppAt("/about");
 
-    const repo = screen.getByRole("link", { name: /github\.com\/WorkerHub\/post/ });
+    const repo = screen.getByRole("link", { name: /github\.com\/WorkerHub\/someday/ });
     expect(repo).toHaveAttribute("href", REPO_URL);
-    expect(REPO_URL).toBe("https://github.com/WorkerHub/post");
+    expect(REPO_URL).toBe("https://github.com/WorkerHub/someday");
     expect(repo).toHaveAttribute("target", "_blank");
     expect(repo.getAttribute("rel")).toContain("noopener");
   });

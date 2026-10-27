@@ -1,12 +1,12 @@
-# 时光邮局（post）
+# 时光邮局（someday）
 
-在未来某个日期时间，把一封信通过邮件寄到指定邮箱 —— 小圈子多用户的定时寄信服务。线上域名：post.oneboy.app。
+在未来某个日期时间，把一封信通过邮件寄到指定邮箱 —— 小圈子多用户的定时寄信服务。线上域名：someday.oneboy.app。
 
 ## 技术栈
 
 - monorepo：pnpm workspace，`web/` + `worker/`
-- `web/`（`@post/web`）：React + Vite + TypeScript，构建产物由 Workers Static Assets 托管
-- `worker/`（`@post/worker`）：Hono + Cloudflare Workers，D1 数据库，cron 定时调度（`*/5 * * * *`）
+- `web/`（`@someday/web`）：React + Vite + TypeScript，构建产物由 Workers Static Assets 托管
+- `worker/`（`@someday/worker`）：Hono + Cloudflare Workers，D1 数据库，cron 定时调度（`*/5 * * * *`）
 
 ## 本地开发
 
@@ -37,7 +37,7 @@ cp worker/.dev.vars.example worker/.dev.vars
 
 ### 表前缀（TABLE_PREFIX）
 
-post 使用组织共享 D1，表名一律带前缀（ONE-269）。三态解析：
+someday 使用组织共享 D1，表名一律带前缀（ONE-269）。三态解析：
 
 - 未配置（`undefined`）→ 默认 `post_`（共享 D1 零配置隔离，安全默认）；
 - 显式空串 `""` → 无前缀（部署方自担表名冲突风险）；
@@ -65,14 +65,14 @@ schema 的唯一可信源是 `worker/src/db/migrations.ts` 里按前缀参数化
 | 表名生成入口 | 只经 `worker/src/types.ts` 的 `migrationsTable(prefix)` 一处生成，严禁散落拼接 |
 | 账本结构 | `name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL DEFAULT (unixepoch())` |
 
-**历史已塌缩**：post 无生产数据，历史不逐级展开，只有一条 `schema_v1` = 当前最终 schema
+**历史已塌缩**：someday 无生产数据，历史不逐级展开，只有一条 `schema_v1` = 当前最终 schema
 （6 表 + 4 索引）。今后的变更从 `schema_v2` 起追加。
 
 **runner 语义**（`worker/src/lib/migrations-runner.ts`，两处 setup 入口共用）：
 
 1. 按 TABLE_PREFIX 三态解析生效前缀；
-2. 防静默切换：库里已按其他前缀初始化时中止报错（信号两路：post 独有三表齐全的业务表族，
-   以及可归属到 post 的账本表 `_<前缀核>_schema_migrations`）；共享库里 shortlink / Zeta
+2. 防静默切换：库里已按其他前缀初始化时中止报错（信号两路：someday 独有三表齐全的业务表族，
+   以及可归属到 someday 的账本表 `_<前缀核>_schema_migrations`）；共享库里 shortlink / Zeta
    等其他项目的账本表不会被误判；
 3. 建账本表（`IF NOT EXISTS`）→ 读已应用集合 → 按序执行未记录的迁移，成功后立即写一行；
 4. 首个失败即停、报错，**失败项不落账**（修好后重跑会重试它）。
@@ -85,7 +85,7 @@ schema 的唯一可信源是 `worker/src/db/migrations.ts` 里按前缀参数化
   （重初始化由用户在合并关口执行，团队不碰线上 D1）；
 - 不新增任何 `PRAGMA table_info` 探测式升级代码。
 
-**默认 settings 种子**：post 没有默认 settings 种子数据（`{prefix}system_settings` 的键都由
+**默认 settings 种子**：someday 没有默认 settings 种子数据（`{prefix}system_settings` 的键都由
 业务按需写入），因此没有种子迁移；`setup` 的后置步骤仍是老的两件事——`schema_v1` 落库后
 由 `closeSetup()` 写 `setup_page_enabled=0`，再由第一个注册用户成为管理员。
 
@@ -122,12 +122,12 @@ pnpm test        # worker 单测（vitest）
 - Worker secrets（部署后执行一次）：`wrangler secret put JWT_SECRET`、`wrangler secret put SETUP_SECRET`
 - 首次部署建表：`POST /api/setup` 自动按生效前缀内联建表（无需 `wrangler d1 migrations apply`）
 
-本地手动部署：`pnpm deploy`（内部替换 wrangler.toml 占位符后 `wrangler deploy`）。域名 `post.oneboy.app` 的绑定在部署阶段处理。
+本地手动部署：`pnpm deploy`（内部替换 wrangler.toml 占位符后 `wrangler deploy`）。域名 `someday.oneboy.app` 的绑定在部署阶段处理。
 
 ## 目录结构
 
 ```
-web/      前端（@post/web）
-worker/   Cloudflare Worker（@post/worker，Hono + D1 + KV + cron）
+web/      前端（@someday/web）
+worker/   Cloudflare Worker（@someday/worker，Hono + D1 + KV + cron）
 scripts/  部署辅助脚本
 ```

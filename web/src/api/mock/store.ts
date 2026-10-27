@@ -48,10 +48,10 @@ export interface MockState {
 const DEFAULT_SMTP: SmtpConfig = {
   host: "smtp.example.com",
   port: 465,
-  username: "post@example.com",
+  username: "someday@example.com",
   password: "", // 空串表示未配置（脱敏回显也不含明文）
   password_set: false,
-  from: "post@example.com",
+  from: "someday@example.com",
   from_name: "时光邮局",
 };
 
