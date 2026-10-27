@@ -30,7 +30,7 @@ export async function sendSmtpMessage(
   message: SmtpMessage,
 ): Promise<{ success: boolean; error?: string }> {
   const from = message.from || "noreply@example.com";
-  const fromName = (message.fromName || "post").replace(/[\r\n]/g, "");
+  const fromName = (message.fromName || "someday").replace(/[\r\n]/g, "");
   const isImplicitTls = config.port === 465;
 
   const socket: any = connect({ hostname: config.host, port: config.port }, {

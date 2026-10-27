@@ -47,7 +47,7 @@ export const mockTwoFaApi: TwoFaApi = {
     state.twofa.pendingTotpSecret = TOTP_SECRET;
     return {
       secret: TOTP_SECRET,
-      uri: `otpauth://totp/post:${account.email}?secret=${TOTP_SECRET}&issuer=post`,
+      uri: `otpauth://totp/someday:${account.email}?secret=${TOTP_SECRET}&issuer=someday`,
     };
   },
   async totpEnable(code) {

@@ -267,7 +267,7 @@ auth2faRoutes.post("/passkey/register/options", async (c) => {
     : [];
 
   const options = await generateRegistrationOptions({
-    rpName: "post",
+    rpName: "someday",
     rpID: new URL(c.req.url).hostname,
     userName: user.email,
     userDisplayName: user.email,

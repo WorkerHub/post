@@ -66,7 +66,7 @@ describe("管理后台 SMTP 配置与测试邮件（ONE-176）", () => {
           username: "noreply@example.com",
           password: "super-secret-password",
           from: "noreply@example.com",
-          from_name: "post",
+          from_name: "someday",
         },
         admin,
       ),

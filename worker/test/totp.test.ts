@@ -72,7 +72,7 @@ describe("TOTP 2FA（eNotify 移植）", () => {
     );
     expect(setup.status).toBe(200);
     expect(setup.body.secret).toMatch(/^[A-Z2-7]{32}$/);
-    expect(setup.body.uri).toContain("otpauth://totp/post:");
+    expect(setup.body.uri).toContain("otpauth://totp/someday:");
 
     // 错误验证码 enable 失败
     const badEnable = await request(

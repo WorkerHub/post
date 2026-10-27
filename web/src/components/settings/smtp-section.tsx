@@ -161,7 +161,7 @@ export function SmtpSection() {
                 name="smtp_username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="post@example.com"
+                placeholder="someday@example.com"
                 autoComplete="off"
               />
             </div>
@@ -196,7 +196,7 @@ export function SmtpSection() {
                 name="smtp_from"
                 value={from}
                 onChange={(e) => setFrom(e.target.value)}
-                placeholder="post@example.com"
+                placeholder="someday@example.com"
                 autoComplete="off"
               />
             </div>
