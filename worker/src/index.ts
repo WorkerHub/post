@@ -12,7 +12,9 @@ import { contactsRoutes } from "./routes/contacts";
 import { publicRoutes } from "./routes/public";
 import { adminSmtpRoutes } from "./routes/admin-smtp";
 import { adminSystemRoutes } from "./routes/admin-system";
+import { wakerCallbackRoutes } from "./routes/waker-callback";
 import { processDueLetters } from "./services/scheduler";
+import { CALLBACK_MOUNT_PATH } from "./waker";
 
 export const app = new Hono<HonoEnv>();
 
@@ -69,6 +71,11 @@ app.get("/api/health", (c) =>
 
 // API 兜底：未知接口统一返回 JSON 404，不能落到 SPA 的 index.html。
 app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
+
+// waker 回调入口（ONE-566）：平台同步 POST `/_waker/execute` → processDueLetters(env) → 统计。
+// 与 /api/* 完全隔离（不走 API 的 fail-safe 中间件），验签/幂等/错误码全在 SDK 的 receiver 里。
+// 自有 cron 本单不动，摘除是后续阶段。
+app.route(CALLBACK_MOUNT_PATH, wakerCallbackRoutes());
 
 // SPA fallback: serve static assets, fall back to index.html for client-side routing.
 // ASSETS.fetch 返回的 Response 头不可变，会被 secureHeaders 改写时报错，

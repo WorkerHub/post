@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { setupRoutes } from "../src/routes/setup";
 import { getTablePrefix, migrationsTable, type HonoEnv } from "../src/types";
+import { getMigrations } from "../src/db/migrations";
 import { countUsers, listUsers } from "../src/db/queries/users";
 import {
   cookieHeader,
@@ -67,8 +68,13 @@ describe("setup（ONE-313：只填 SETUP_SECRET 完成初始化，不建任何�
     const { status, body } = await request(env, "/api/setup", setupInit());
     expect(status).toBe(200);
     expect(body).toMatchObject({ success: true, table_prefix: "post_" });
-    // 测试替身库已初始化过（账本已记 schema_v1）→ 本次全部 skipped
-    expect(body.migrations).toEqual([{ name: "schema_v1", status: "skipped" }]);
+    // 测试替身库已初始化过（账本已记全部迁移）→ 本次全部 skipped
+    expect(body.migrations).toEqual(
+      getMigrations(getTablePrefix(env)).map((m) => ({
+        name: m.name,
+        status: "skipped",
+      })),
+    );
 
     // setup 关闭，但账号数仍为 0（初始化不建号）
     expect((await request(env, "/api/setup/state")).body).toEqual({
@@ -90,8 +96,10 @@ describe("setup（ONE-313：只填 SETUP_SECRET 完成初始化，不建任何�
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.table_prefix).toBe("post_");
-    expect(body.applied).toBe(1);
-    expect(body.migrations).toEqual([{ name: "schema_v1", status: "applied" }]);
+    expect(body.applied).toBe(getMigrations("post_").length);
+    expect(body.migrations).toEqual(
+      getMigrations("post_").map((m) => ({ name: m.name, status: "applied" })),
+    );
 
     // 业务表与账本表都建出来了
     const tables = (
@@ -104,17 +112,18 @@ describe("setup（ONE-313：只填 SETUP_SECRET 完成初始化，不建任何�
         "post_users",
         "post_letters",
         "post_system_settings",
+        "post_waker_executions",
         migrationsTable("post_"),
       ]),
     );
 
-    // 账本恰含 schema_v1
+    // 账本按序记下全部迁移
     const ledger = (
       await env.DB.prepare(`SELECT name FROM ${migrationsTable("post_")}`).all<{
         name: string;
       }>()
     ).results.map((r) => r.name);
-    expect(ledger).toEqual(["schema_v1"]);
+    expect(ledger).toEqual(getMigrations("post_").map((m) => m.name));
 
     // 初始化完成：setup 关闭，且仍未建任何账号
     expect((await request(env, "/api/setup/state")).body).toEqual({

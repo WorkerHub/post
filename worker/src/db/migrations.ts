@@ -134,5 +134,24 @@ CREATE TABLE IF NOT EXISTS ${t("system_settings")} (
 );
 `,
     },
+    {
+      name: "schema_v2",
+      // waker 回调的执行幂等账本（ONE-566）：SDK 的 executionId 去重表。
+      // 建表语句与 waker client `executionLedgerDdl()` 逐列等价，但**在此冻结为字面 SQL**：
+      // 迁移一旦合并就不可再改（账本按名字记账，SDK 日后改 DDL 也不得改动本历史项）。
+      // 只用于 executionId 去重，不是业务真源；业务防重仍靠 letters 状态抢占。
+      sql: `
+CREATE TABLE IF NOT EXISTS ${t("waker_executions")} (
+  execution_id   TEXT PRIMARY KEY,
+  job_id         TEXT NOT NULL,
+  job_name       TEXT NOT NULL,
+  scheduled_for  INTEGER NOT NULL,
+  status         TEXT NOT NULL,
+  response_json  TEXT,
+  claimed_at     INTEGER NOT NULL,
+  completed_at   INTEGER
+);
+`,
+    },
   ];
 }

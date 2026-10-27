@@ -114,6 +114,7 @@ describe("schema_v1 迁移（历史塌缩后的最终 schema）", () => {
       "post_system_settings",
       "post_user_2fa",
       "post_users",
+      "post_waker_executions",
     ]);
     expect(names("index", true)).toEqual([
       "idx_post_contacts_user_email",
@@ -156,7 +157,10 @@ describe("迁移建出的表名与 queries 引用的表名一致", () => {
     const env = emptyEnv("kp_");
     const result = await runMigrations(env);
     expect(result.prefix).toBe("kp_");
-    expect(result.migrations).toEqual([{ name: "schema_v1", status: "applied" }]);
+    expect(result.migrations).toEqual([
+      { name: "schema_v1", status: "applied" },
+      { name: "schema_v2", status: "applied" },
+    ]);
 
     const created = (env.DB as unknown as SqliteD1).db
       .prepare("SELECT name FROM sqlite_master WHERE type='table'")
