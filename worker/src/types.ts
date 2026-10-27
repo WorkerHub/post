@@ -9,6 +9,12 @@ export interface Env {
    * undefined → 默认 "post_"；"" → 显式无前缀；其他值需匹配 /^[a-z0-9_]*$/。
    */
   TABLE_PREFIX?: string;
+  /**
+   * waker 项目 signing key（回调验签用，ONE-566）：只来自 secrets（GitHub Secrets →
+   * `wrangler deploy --secrets-file`），绝不进 [vars]、不进仓库。
+   * 未配置时回调入口 fail closed（500 `signing_key_missing`），不影响其它路由。
+   */
+  WAKER_SIGNING_KEY?: string;
 }
 
 export type HonoEnv = {

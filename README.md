@@ -65,8 +65,9 @@ schema 的唯一可信源是 `worker/src/db/migrations.ts` 里按前缀参数化
 | 表名生成入口 | 只经 `worker/src/types.ts` 的 `migrationsTable(prefix)` 一处生成，严禁散落拼接 |
 | 账本结构 | `name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL DEFAULT (unixepoch())` |
 
-**历史已塌缩**：someday 无生产数据，历史不逐级展开，只有一条 `schema_v1` = 当前最终 schema
-（6 表 + 4 索引）。今后的变更从 `schema_v2` 起追加。
+**历史已塌缩**：someday 无生产数据，历史不逐级展开，`schema_v1` = 当前业务 schema
+（6 表 + 4 索引）。`schema_v2` 起为增量迁移（当前：`{prefix}waker_executions`，waker 回调的
+执行幂等账本，见下“waker 回调入口”）。
 
 **runner 语义**（`worker/src/lib/migrations-runner.ts`，两处 setup 入口共用）：
 
@@ -103,6 +104,23 @@ schema 的唯一可信源是 `worker/src/db/migrations.ts` 里按前缀参数化
 - `GET /api/admin/setup-switch`（管理员会话）→ `{enabled:boolean}`；`POST /api/admin/setup-switch`（管理员会话，body `{enabled:boolean}`）→ `{success:true, enabled}`。开关与 SMTP 配置同库存放：`{prefix}system_settings` 的 `setup_page_switch` 键（无新表/新键，无需迁移），默认 ON。
 - 开关 OFF 后 `GET /api/setup/state` 一律 404（浏览器访问 setup 页即 404）；ON 时恢复既有 `isSetupAvailable` 判定（`setup_page_enabled` 初始化标记 + 账号数为 0）。两者是不同的键：`setup_page_enabled` 由 `POST /api/setup` 写死，管理后台只改 `setup_page_switch`。
 
+### waker 回调入口（ONE-566）
+
+定时投递的触发源可由 waker 平台回调驱动（试点期与自有 cron 双跑，cron 仍保留）：
+
+| 项 | 值 |
+| --- | --- |
+| 回调地址 | `https://someday.oneboy.app/_waker/execute`（SDK 的 `CALLBACK_MOUNT_PATH` + `/execute`） |
+| 任务名 | `deliver-due-letters`（`worker/src/services/waker-callback.ts` 的 `DUE_LETTERS_JOB`，须与 waker 平台里注册的 job 名逐字一致） |
+| 验签 | HMAC-SHA256 覆盖 `timestamp + executionId + jobId + rawBody`，300s 时间窗，由 SDK receiver 完成；未带签名/篡改/过期 → 401，缺 signing key → 500（fail closed） |
+| 执行语义 | handler `await processDueLetters(env)` 跑完才回 2xx，响应体带 `{ stats }`（`scanned` / `delivered` / `partialFailed` / `gaveUp`，口径同 `processDueLetters`）；抛错/DB 不可用 → 5xx，平台重试 |
+| 幂等 | executionId 由 SDK 的 D1 账本去重（`{prefix}waker_executions`，`schema_v2`），重复投递回 2xx + `duplicate:true` + 首响应回放；业务防重仍是 letters 状态抢占（最终防线，未改） |
+
+SDK 是**源码拷贝**（`worker/src/waker/`，来源与版本见该目录 `README.md`），不手改；升级回 waker 仓库改完再整目录重拷。
+签名密钥 `WAKER_SIGNING_KEY` 只走 secrets：线上配 GitHub repository secret，Deploy workflow 写进 `--secrets-file` 注入；本地放 `worker/.dev.vars`（自生成的测试 key）。
+
+**上线先后**：部署后需由管理员跑一次 `POST /api/admin/db-upgrade` 应用 `schema_v2`（新建 `{prefix}waker_executions`）；未跑之前回调会因账本表缺失回 500（cron 仍在，投递不受影响）。
+
 ## 校验命令（CI 同款）
 
 ```bash
@@ -120,6 +138,7 @@ pnpm test        # worker 单测（vitest）
 - Repository secret：`CLOUDFLARE_API_TOKEN`（Workers/D1/KV 部署权限）
 - Repository variables：`CLOUDFLARE_ACCOUNT_ID`、`D1_DATABASE_NAME`、`D1_DATABASE_ID`、`KV_NAMESPACE_ID`；可选 `TABLE_PREFIX`（表前缀，未配置时默认 `post_`）
 - Worker secrets（部署后执行一次）：`wrangler secret put JWT_SECRET`、`wrangler secret put SETUP_SECRET`
+- 可选 secret：`WAKER_SIGNING_KEY`（waker 项目回调验签密钥，ONE-566）。未配置时 `/_waker/execute` fail closed 回 500，其余路由不受影响；建好 waker 项目拿到一次性 signing key 后配上并重新部署即可
 - 首次部署建表：`POST /api/setup` 自动按生效前缀内联建表（无需 `wrangler d1 migrations apply`）
 
 本地手动部署：`pnpm deploy`（内部替换 wrangler.toml 占位符后 `wrangler deploy`）。域名 `someday.oneboy.app` 的绑定在部署阶段处理。

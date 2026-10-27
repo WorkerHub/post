@@ -10,6 +10,7 @@ import {
 } from "./helpers";
 import type { Env } from "../src/types";
 import { getTablePrefix } from "../src/types";
+import { getMigrations } from "../src/db/migrations";
 import { getSetting } from "../src/db/queries/users";
 import { SETUP_SWITCH_KEY, setSetupPageEnabled } from "../src/lib/setup";
 
@@ -59,10 +60,12 @@ describe("POST /api/admin/db-upgrade（ONE-319：免 SETUP_SECRET 升级数据�
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.table_prefix).toBe("post_");
-    // 已初始化过的库（账本已记 schema_v1）→ 本次全部 skipped
+    // 已初始化过的库（账本已记全部迁移）→ 本次全部 skipped
     expect(body.applied).toBe(0);
-    expect(body.skipped).toBe(1);
-    expect(body.migrations).toEqual([{ name: "schema_v1", status: "skipped" }]);
+    expect(body.skipped).toBe(getMigrations("post_").length);
+    expect(body.migrations).toEqual(
+      getMigrations("post_").map((m) => ({ name: m.name, status: "skipped" })),
+    );
   });
 
   it("幂等：重复调用结果一致，且不破坏既有数据与设置", async () => {

@@ -5,3 +5,8 @@ SETUP_SECRET=local-dev-setup-secret
 
 # 可选表前缀（非 secret）：不设/留空 → 默认 "post_"；"" → 显式无前缀；其他值须匹配 /^[a-z0-9_]*$/。
 # TABLE_PREFIX=post_
+
+# waker 回调验签密钥（ONE-566，secret）：线上来自 GitHub Secrets 的 WAKER_SIGNING_KEY，
+# 由 Deploy workflow 写进 --secrets-file 注入。本地想调 /_waker/execute 时填一把**自生成的测试 key**
+# （不要用线上那把）；不填则回调入口 fail closed（500 signing_key_missing），其它路由不受影响。
+# WAKER_SIGNING_KEY=local-test-waker-signing-key

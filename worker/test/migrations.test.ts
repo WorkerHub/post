@@ -76,18 +76,19 @@ describe("migrationsTable() 命名三态", () => {
 // ─── runner 语义 ─────────────────────────────────────────────────────────────
 
 describe("runMigrations（空库首跑 / 重跑）", () => {
-  it("空库首跑：全部 applied，账本恰含 schema_v1，表与索引建好", async () => {
+  it("空库首跑：全部 applied，账本按序记下 schema_v1 / schema_v2，表与索引建好", async () => {
     const { env, sqlite } = emptyEnv();
     const result = await runMigrations(env);
 
     expect(result.prefix).toBe("post_");
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "applied" },
+      { name: "schema_v2", status: "applied" },
     ]);
 
-    // 账本恰含一条 schema_v1
+    // 账本按序记下两条迁移
     expect(tableNames(sqlite)).toContain("_post_schema_migrations");
-    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1"]);
+    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1", "schema_v2"]);
 
     // 业务表 + 索引都建出来了
     const names = tableNames(sqlite);
@@ -98,6 +99,8 @@ describe("runMigrations（空库首跑 / 重跑）", () => {
       "post_letter_recipients",
       "post_contacts",
       "post_system_settings",
+      // schema_v2：waker 回调的执行幂等账本（ONE-566）
+      "post_waker_executions",
     ]) {
       expect(names).toContain(t);
     }
@@ -120,20 +123,21 @@ describe("runMigrations（空库首跑 / 重跑）", () => {
     const result = await runMigrations(env);
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "skipped" },
+      { name: "schema_v2", status: "skipped" },
     ]);
     expect(schemaSnapshot(sqlite)).toBe(before);
-    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1"]);
+    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1", "schema_v2"]);
   });
 
   it("自定义前缀与显式空前缀同样走账本", async () => {
     const custom = await emptyEnv("kp_");
     expect((await runMigrations(custom.env)).prefix).toBe("kp_");
-    expect(ledgerNames(custom.sqlite, "kp_")).toEqual(["schema_v1"]);
+    expect(ledgerNames(custom.sqlite, "kp_")).toEqual(["schema_v1", "schema_v2"]);
 
     const none = await emptyEnv("");
     expect((await runMigrations(none.env)).prefix).toBe("");
     expect(tableNames(none.sqlite)).toContain("_schema_migrations");
-    expect(ledgerNames(none.sqlite, "")).toEqual(["schema_v1"]);
+    expect(ledgerNames(none.sqlite, "")).toEqual(["schema_v1", "schema_v2"]);
     expect(tableNames(none.sqlite)).toContain("users");
   });
 });
@@ -172,6 +176,7 @@ describe("runMigrations 防静默切换（前缀冲突）", () => {
     const result = await runMigrations(env);
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "skipped" },
+      { name: "schema_v2", status: "skipped" },
     ]);
   });
 
@@ -190,6 +195,7 @@ describe("runMigrations 防静默切换（前缀冲突）", () => {
     expect(result.prefix).toBe("post_");
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "applied" },
+      { name: "schema_v2", status: "applied" },
     ]);
   });
 });

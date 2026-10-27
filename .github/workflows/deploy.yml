@@ -63,6 +63,7 @@ jobs:
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           SETUP_SECRET: ${{ secrets.SETUP_SECRET }}
+          WAKER_SIGNING_KEY: ${{ secrets.WAKER_SIGNING_KEY }}
         run: |
           node -e '
             const fs = require("fs");
@@ -74,6 +75,17 @@ jobs:
               if (!value) {
                 console.error(name + " is missing — configure it as a GitHub repository secret");
                 process.exit(1);
+              }
+            }
+            // waker 回调验签密钥（ONE-566）：可选。未配置时不影响部署，
+            // 只是 /_waker/execute 会 fail closed 回 500 signing_key_missing，
+            // 先部署后建项目、拿到一次性 signing key 后再配 secret 重新部署即可。
+            const optional = { WAKER_SIGNING_KEY: process.env.WAKER_SIGNING_KEY };
+            for (const [name, value] of Object.entries(optional)) {
+              if (value) {
+                secrets[name] = value;
+              } else {
+                console.warn(name + " is not configured — waker callbacks will answer 500 signing_key_missing until it is set");
               }
             }
             fs.writeFileSync(
