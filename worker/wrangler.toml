@@ -32,5 +32,3 @@ id = "KV_NAMESPACE_ID_PLACEHOLDER"
 # 表前缀 TABLE_PREFIX（非 secret，GitHub Variables / Wrangler [vars] 注入，可选）：
 # 未配置 → 默认 "post_"；"" → 显式无前缀；其他值须匹配 /^[a-z0-9_]*$/（不自动补下划线）。
 
-[triggers]
-crons = ["*/5 * * * *"]
