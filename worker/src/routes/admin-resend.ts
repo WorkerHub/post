@@ -1,13 +1,16 @@
 import { Hono } from "hono";
-import type { HonoEnv } from "../types";
+import type { Env, HonoEnv } from "../types";
 import { getTablePrefix } from "../types";
 import { authMiddleware, adminMiddleware } from "../middleware/auth";
 import { getSetting, setSetting } from "../db/queries/users";
-import { isValidEmail } from "../services/email";
+import { hasInjectionChars, isValidEmail } from "../services/email";
 import {
   MAIL_CHANNEL_KEY,
   RESEND_TOKENS_KEY,
+  RESEND_SENDER_KEY,
+  readResendSender,
   sendResendEmail,
+  type ResendSender,
 } from "../services/resend";
 
 // 管理后台 Resend 发信渠道配置（对齐 admin-smtp.ts 的读写与脱敏口径）：
@@ -24,14 +27,13 @@ const VALID_CHANNELS = new Set(["smtp", "resend"]);
 interface ResendState {
   channel: string;
   tokens: Record<string, string>;
+  sender: ResendSender;
 }
 
-async function readState(
-  db: D1Database,
-  prefix: string,
-): Promise<ResendState> {
-  const channel = (await getSetting(db, prefix, MAIL_CHANNEL_KEY)) ?? "smtp";
-  const raw = await getSetting(db, prefix, RESEND_TOKENS_KEY);
+async function readState(env: Env): Promise<ResendState> {
+  const channel =
+    (await getSetting(env.DB, getTablePrefix(env), MAIL_CHANNEL_KEY)) ?? "smtp";
+  const raw = await getSetting(env.DB, getTablePrefix(env), RESEND_TOKENS_KEY);
   let tokens: Record<string, string> = {};
   if (raw) {
     try {
@@ -49,7 +51,8 @@ async function readState(
       /* 坏值宽容：按空处理 */
     }
   }
-  return { channel, tokens };
+  const sender = await readResendSender(env);
+  return { channel, tokens, sender };
 }
 
 function maskedView(tokens: Record<string, string>) {
@@ -63,8 +66,13 @@ function maskedView(tokens: Record<string, string>) {
 }
 
 adminResendRoutes.get("/resend", async (c) => {
-  const { channel, tokens } = await readState(c.env.DB, getTablePrefix(c.env));
-  return c.json({ channel, ...maskedView(tokens) });
+  const { channel, tokens, sender } = await readState(c.env);
+  return c.json({
+    channel,
+    from: sender.from,
+    from_name: sender.from_name,
+    ...maskedView(tokens),
+  });
 });
 
 adminResendRoutes.put("/resend", async (c) => {
@@ -73,7 +81,7 @@ adminResendRoutes.put("/resend", async (c) => {
     return c.json({ error: "Invalid request body" }, 400);
   }
 
-  const existing = await readState(c.env.DB, getTablePrefix(c.env));
+  const existing = await readState(c.env);
 
   let channel = existing.channel;
   if (body.channel !== undefined) {
@@ -83,7 +91,26 @@ adminResendRoutes.put("/resend", async (c) => {
     channel = body.channel;
   }
 
-  const tokens: Record<string, string> = { ...existing.tokens };
+  // 发件身份（与 smtp_config 解耦）：from/from_name 至少给一个才更新；
+  // from 非空时校验邮箱，from_name 剥注入字符（对齐 SMTP 配置口径）。
+  let sender = existing.sender;
+  const fromRaw = typeof body.from === "string" ? body.from.trim() : undefined;
+  const fromNameRaw =
+    typeof body.from_name === "string" ? body.from_name : undefined;
+  if (fromRaw !== undefined || fromNameRaw !== undefined) {
+    const from = fromRaw ?? existing.sender.from;
+    const fromName = (fromNameRaw ?? existing.sender.from_name)
+      .replace(/[<>"\r\n]/g, "")
+      .trim();
+    if (from && (hasInjectionChars(from) || !isValidEmail(from))) {
+      return c.json({ error: "发件人邮箱不正确" }, 400);
+    }
+    sender = { from, from_name: fromName };
+  }
+
+  // resend_tokens：以本次提交的域名键整体重建，删域 = 不提交该键即移除。
+  // 某域名留空 token = 保留存量（若存在）；提交非空 token = 覆盖该域名。
+  let tokens: Record<string, string> = { ...existing.tokens };
   if (body.resend_tokens !== undefined) {
     if (
       typeof body.resend_tokens !== "object" ||
@@ -92,15 +119,23 @@ adminResendRoutes.put("/resend", async (c) => {
     ) {
       return c.json({ error: "resend_tokens 须为 {域名: token} 对象" }, 400);
     }
+    const next: Record<string, string> = {};
     for (const [domain, token] of Object.entries(
       body.resend_tokens as Record<string, unknown>,
     )) {
+      const d = domain.trim();
+      if (!d) continue;
       if (typeof token !== "string") continue;
       const trimmed = token.trim();
-      // 留空 = 不改（对齐 SMTP 密码口径）；否则覆盖该域名 token。
-      if (trimmed === "") continue;
-      tokens[domain] = trimmed;
+      if (trimmed === "") {
+        // 留空 = 不改（对齐 SMTP 密码口径）：保留存量 token（若存在）
+        const keep = existing.tokens[d];
+        if (keep) next[d] = keep;
+      } else {
+        next[d] = trimmed;
+      }
     }
+    tokens = next;
   }
 
   await setSetting(c.env.DB, getTablePrefix(c.env), MAIL_CHANNEL_KEY, channel);
@@ -110,8 +145,19 @@ adminResendRoutes.put("/resend", async (c) => {
     RESEND_TOKENS_KEY,
     JSON.stringify(tokens),
   );
+  await setSetting(
+    c.env.DB,
+    getTablePrefix(c.env),
+    RESEND_SENDER_KEY,
+    JSON.stringify(sender),
+  );
 
-  return c.json({ channel, ...maskedView(tokens) });
+  return c.json({
+    channel,
+    from: sender.from,
+    from_name: sender.from_name,
+    ...maskedView(tokens),
+  });
 });
 
 adminResendRoutes.post("/resend/test", async (c) => {
@@ -122,26 +168,15 @@ adminResendRoutes.post("/resend/test", async (c) => {
     return c.json({ error: "请填写有效的测试收件邮箱" }, 400);
   }
 
-  // 发件身份读 smtp_config（与 sendEmail 的 resend 分支同口径，宽容解析）。
-  let from = "";
-  let fromName = "";
-  const configStr = await getSetting(c.env.DB, getTablePrefix(c.env), "smtp_config");
-  if (configStr) {
-    try {
-      const cfg = JSON.parse(configStr) as Record<string, unknown>;
-      from = String(cfg.from ?? "").trim();
-      fromName = String(cfg.from_name ?? "").trim();
-    } catch {
-      /* 坏配置不阻塞测试，交由 sendResendEmail 报 sender 未配置 */
-    }
-  }
+  // 发件身份读独立 resend_sender（与 sendEmail 的 resend 分支同口径）。
+  const sender = await readResendSender(c.env);
 
   const result = await sendResendEmail(c.env, {
     to: email,
     subject: "时光邮局测试邮件",
     html: "<p>这是一封来自时光邮局的测试邮件。如果你收到了它，说明 Resend 配置正确。</p>",
-    from,
-    fromName: fromName || "时光邮局",
+    from: sender.from,
+    fromName: sender.from_name || "时光邮局",
   });
 
   if (!result.success) {

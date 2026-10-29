@@ -24,6 +24,8 @@ function nextRowKey(): string {
 export function ResendSection() {
   const [config, setConfig] = useState<ResendConfig | null>(null);
   const [channel, setChannel] = useState<"smtp" | "resend">("smtp");
+  const [from, setFrom] = useState("");
+  const [fromName, setFromName] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [testTo, setTestTo] = useState("");
   const [loading, setLoading] = useState(true);
@@ -43,6 +45,8 @@ export function ResendSection() {
       const cfg = await adminApi.getResend();
       setConfig(cfg);
       setChannel(cfg.channel);
+      setFrom(cfg.from);
+      setFromName(cfg.from_name);
       const domains = Object.keys(cfg.tokens_set);
       setRows(
         domains.map((d) => ({
@@ -96,7 +100,7 @@ export function ResendSection() {
 
     setSaving(true);
     try {
-      await adminApi.updateResend({ channel, resend_tokens });
+      await adminApi.updateResend({ channel, from, from_name: fromName, resend_tokens });
       setNotice("Resend 配置已保存");
       // 重新拉取，刷新脱敏视图与 configured 标记
       await load();
@@ -173,6 +177,38 @@ export function ResendSection() {
               />
               Resend（API 直连 + webhook 回写投递状态）
             </label>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-xs text-ink-500" htmlFor="resend-from">
+                Resend 发件邮箱
+              </label>
+              <Input
+                id="resend-from"
+                name="resend_from"
+                type="email"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                placeholder="如 notify@someday.example.com"
+                aria-label="Resend 发件邮箱"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-ink-500" htmlFor="resend-from-name">
+                Resend 发件人名称
+              </label>
+              <Input
+                id="resend-from-name"
+                name="resend_from_name"
+                value={fromName}
+                onChange={(e) => setFromName(e.target.value)}
+                placeholder="如 时光邮局"
+                aria-label="Resend 发件人名称"
+                autoComplete="off"
+              />
+            </div>
           </div>
 
           <div className="mt-5">

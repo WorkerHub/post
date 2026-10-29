@@ -61,6 +61,8 @@ const DEFAULT_SMTP: SmtpConfig = {
 
 const DEFAULT_RESEND: ResendConfig = {
   channel: "smtp",
+  from: "",
+  from_name: "",
   resend_tokens: {},
   tokens_set: {},
 };

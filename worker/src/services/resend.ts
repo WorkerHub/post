@@ -14,9 +14,15 @@ import { senderDomain } from "./smtp-transport";
 
 export const MAIL_CHANNEL_KEY = "mail_channel";
 export const RESEND_TOKENS_KEY = "resend_tokens";
+export const RESEND_SENDER_KEY = "resend_sender";
 
 const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
 const WH_SEC_PREFIX = "whsec_";
+
+export interface ResendSender {
+  from: string;
+  from_name: string;
+}
 
 export interface ResendSendArgs {
   to: string;
@@ -62,6 +68,25 @@ async function readResendTokens(
     return out;
   } catch {
     return {};
+  }
+}
+
+/** 读 Resend 渠道的发件身份（from/from_name，与 smtp_config 解耦）。坏值宽容，返回空串。 */
+export async function readResendSender(env: Env): Promise<ResendSender> {
+  const raw = await getSetting(env.DB, getTablePrefix(env), RESEND_SENDER_KEY);
+  if (!raw) return { from: "", from_name: "" };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { from: "", from_name: "" };
+    }
+    const obj = parsed as Record<string, unknown>;
+    return {
+      from: typeof obj.from === "string" ? obj.from.trim() : "",
+      from_name: typeof obj.from_name === "string" ? obj.from_name.trim() : "",
+    };
+  } catch {
+    return { from: "", from_name: "" };
   }
 }
 
@@ -188,20 +213,33 @@ export async function verifyResendSignature(
   } catch {
     return false;
   }
+  if (keyBytes.length === 0) return false;
 
-  const signedContent = `${headers.id}.${headers.timestamp}.${rawBody}`;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyBytes,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedContent));
-  const expected = bytesToBase64(new Uint8Array(sig));
+  let expected: string;
+  try {
+    const signedContent = `${headers.id}.${headers.timestamp}.${rawBody}`;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      keyBytes,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode(signedContent),
+    );
+    expected = bytesToBase64(new Uint8Array(sig));
+  } catch {
+    // 密钥格式损坏 / Web Crypto 异常：一律 fail closed（401），不抛 500。
+    return false;
+  }
 
+  // 只接受带 `v1,` 版本前缀的签名段（Svix 规范）；无前缀或其它版本一律跳过。
   for (const part of headers.signature.split(" ").map((s) => s.trim()).filter(Boolean)) {
-    const candidate = part.startsWith("v1,") ? part.slice(3) : part;
+    if (!part.startsWith("v1,")) continue;
+    const candidate = part.slice(3);
     if (timingSafeEqual(candidate, expected)) return true;
   }
   return false;

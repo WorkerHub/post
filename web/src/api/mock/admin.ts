@@ -63,6 +63,8 @@ export const mockAdminApi: AdminApi = {
     // 脱敏：永不下发 token 明文（resend_tokens 恒为空串，tokens_set 标记是否已配）
     return {
       channel: state.resend.channel,
+      from: state.resend.from,
+      from_name: state.resend.from_name,
       resend_tokens: Object.fromEntries(
         Object.keys(state.resend.resend_tokens).map((d) => [d, ""]),
       ),
@@ -71,14 +73,30 @@ export const mockAdminApi: AdminApi = {
   },
   async updateResend(patch: ResendPatch) {
     state.resend.channel = patch.channel;
+    if (patch.from !== undefined) state.resend.from = patch.from;
+    if (patch.from_name !== undefined) state.resend.from_name = patch.from_name;
     if (patch.resend_tokens) {
+      // 以本次提交的域名键整体重建：缺失键 = 删除；留空 = 保留存量；非空 = 覆盖。
+      const nextTokens: Record<string, string> = {};
       for (const [domain, token] of Object.entries(patch.resend_tokens)) {
-        // 留空 = 不改（对齐 SMTP 密码口径）
-        if (!token || token.trim() === "") continue;
-        state.resendTokens[domain] = token.trim();
-        state.resend.resend_tokens[domain] = "";
-        state.resend.tokens_set[domain] = true;
+        const d = domain.trim();
+        if (!d) continue;
+        const trimmed = (token ?? "").trim();
+        if (trimmed === "") {
+          // 留空 = 不改（对齐 SMTP 密码口径）：保留存量 token（若存在）
+          const keep = state.resendTokens[d];
+          if (keep) nextTokens[d] = keep;
+        } else {
+          nextTokens[d] = trimmed;
+        }
       }
+      state.resendTokens = nextTokens;
+      state.resend.resend_tokens = Object.fromEntries(
+        Object.keys(nextTokens).map((d) => [d, ""]),
+      );
+      state.resend.tokens_set = Object.fromEntries(
+        Object.keys(nextTokens).map((d) => [d, true]),
+      );
     }
   },
   async testResend(email): Promise<SmtpTestResult> {

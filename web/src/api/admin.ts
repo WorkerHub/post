@@ -58,15 +58,21 @@ export interface SmtpTestResult {
 export interface ResendConfig {
   /** 实际发信渠道：SMTP（默认，与现有行为零变化）或 Resend。 */
   channel: "smtp" | "resend";
+  /** 发件身份（与 smtp_config 解耦，Resend 渠道独立）。 */
+  from: string;
+  from_name: string;
   /** 脱敏：{域名: ""}；域名对应 Resend 已验证的发信域。 */
   resend_tokens: Record<string, string>;
   /** {域名: 是否已配 token}。 */
   tokens_set: Record<string, boolean>;
 }
 
-/** PUT /api/admin/settings/resend 载荷：resend_tokens 某域名留空表示不改。 */
+/** PUT /api/admin/settings/resend 载荷：resend_tokens 某域名留空表示不改；缺失键表示删除该域名。 */
 export interface ResendPatch {
   channel: "smtp" | "resend";
+  /** 发件身份（可选，缺省不改）。 */
+  from?: string;
+  from_name?: string;
   resend_tokens?: Record<string, string>;
 }
 

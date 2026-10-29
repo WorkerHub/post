@@ -7,6 +7,7 @@ import {
   verifyResendSignature,
   MAIL_CHANNEL_KEY,
   RESEND_TOKENS_KEY,
+  RESEND_SENDER_KEY,
 } from "../src/services/resend";
 import { classifySendFailure } from "../src/services/send-throttle";
 
@@ -88,8 +89,6 @@ describe("sendResendEmail（Resend API 直连）", () => {
   async function configuredEnv(): Promise<Env> {
     const env = makeEnv();
     await setRawSetting(env, RESEND_TOKENS_KEY, JSON.stringify({ "example.com": "re_token" }));
-    // 发件域取 smtp_config.from 的域名
-    await setRawSetting(env, "smtp_config", JSON.stringify({ from: "notify@example.com", from_name: "时光邮局" }));
     return env;
   }
 
@@ -175,6 +174,29 @@ describe("verifyResendSignature（Svix）", () => {
     const tampered = await signSvix(TEST_SECRET, rawBody + " ", id, timestamp);
     expect(await verifyResendSignature(TEST_SECRET, { id, timestamp, signature: tampered }, rawBody)).toBe(false);
   });
+
+  it("只接受带 v1, 前缀的签名段；无前缀/其它版本一律拒绝", async () => {
+    const good = await signSvix(TEST_SECRET, rawBody, id, timestamp);
+
+    // 去掉 v1, 前缀：拒绝（旧实现会把无前缀段也当候选比对）
+    expect(
+      await verifyResendSignature(TEST_SECRET, { id, timestamp, signature: good.slice(3) }, rawBody),
+    ).toBe(false);
+    // 改成其它版本前缀：拒绝
+    expect(
+      await verifyResendSignature(TEST_SECRET, { id, timestamp, signature: `v2,${good.slice(3)}` }, rawBody),
+    ).toBe(false);
+    // 列表里混入合法 v1 段仍通过
+    expect(
+      await verifyResendSignature(TEST_SECRET, { id, timestamp, signature: `v2,xxx ${good}` }, rawBody),
+    ).toBe(true);
+  });
+
+  it("坏密钥（whsec_ 但非合法 base64）fail closed 返回 false，不抛异常", async () => {
+    await expect(
+      verifyResendSignature("whsec_@@@not-base64", { id, timestamp, signature: "v1,x" }, rawBody),
+    ).resolves.toBe(false);
+  });
 });
 
 describe("classifySendFailure 的 HTTP 通道分类", () => {
@@ -259,6 +281,44 @@ describe("管理后台 Resend 渠道配置", () => {
       .bind(RESEND_TOKENS_KEY)
       .first<{ value: string }>();
     expect(JSON.parse(raw!.value)["example.com"]).toBe("re_token");
+  });
+
+  it("删除域名：提交不含某域名的 resend_tokens 即移除该域", async () => {
+    const { env, admin } = await adminEnv();
+    await request(env, "/api/admin/settings/resend", jsonInit("PUT", {
+      channel: "resend",
+      resend_tokens: { "a.com": "ta", "b.com": "tb" },
+    }, admin));
+    // 只提交 a.com（留空=保留）：b.com 缺失 → 删除
+    await request(env, "/api/admin/settings/resend", jsonInit("PUT", {
+      channel: "resend",
+      resend_tokens: { "a.com": "" },
+    }, admin));
+    const raw = await env.DB.prepare(`SELECT value FROM ${tables(env).system_settings} WHERE key = ?`)
+      .bind(RESEND_TOKENS_KEY)
+      .first<{ value: string }>();
+    expect(JSON.parse(raw!.value)).toEqual({ "a.com": "ta" });
+  });
+
+  it("发件身份独立于 smtp_config：PUT 保存 resend_sender，GET 回显", async () => {
+    const { env, admin } = await adminEnv();
+    const put = await request(env, "/api/admin/settings/resend", jsonInit("PUT", {
+      channel: "resend",
+      from: "notify@someday.example.com",
+      from_name: "时光邮局",
+    }, admin));
+    expect(put.status).toBe(200);
+    expect(put.body.from).toBe("notify@someday.example.com");
+    expect(put.body.from_name).toBe("时光邮局");
+
+    const raw = await env.DB.prepare(`SELECT value FROM ${tables(env).system_settings} WHERE key = ?`)
+      .bind(RESEND_SENDER_KEY)
+      .first<{ value: string }>();
+    expect(JSON.parse(raw!.value)).toEqual({ from: "notify@someday.example.com", from_name: "时光邮局" });
+
+    const get = await request(env, "/api/admin/settings/resend", { headers: admin });
+    expect(get.body.from).toBe("notify@someday.example.com");
+    expect(get.body.from_name).toBe("时光邮局");
   });
 });
 
