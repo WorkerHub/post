@@ -57,16 +57,31 @@ describe("工作台 · 四视图状态", () => {
     expect(await screen.findByText("草稿信")).toBeInTheDocument();
     expect(screen.queryByText("定时信")).not.toBeInTheDocument();
 
+    // 可编辑状态标题进编辑器
+    expect(screen.getByRole("link", { name: "草稿信" })).toHaveAttribute(
+      "href",
+      "/compose/l-draft",
+    );
+
     clickTab(/待寄出/);
     expect(screen.getByText("定时信")).toBeInTheDocument();
     expect(screen.queryByText("草稿信")).not.toBeInTheDocument();
 
+    // 不可编辑状态标题进只读详情页（已寄出 / 失败）
     clickTab(/已寄出/);
     expect(screen.getByText("已寄信")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "已寄信" })).toHaveAttribute(
+      "href",
+      "/letters/l-sent",
+    );
 
     clickTab(/失败/);
     expect(screen.getByText("失败信")).toBeInTheDocument();
     expect(screen.getByText(/SMTP 认证失败/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "失败信" })).toHaveAttribute(
+      "href",
+      "/letters/l-failed",
+    );
   });
 });
 
