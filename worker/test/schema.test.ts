@@ -88,6 +88,8 @@ describe("schema_v1 迁移（历史塌缩后的最终 schema）", () => {
 
   it("按生效前缀参数化表名（不含裸表名）", () => {
     const sql = schemaSql("post_");
+    // 迁移里不含裸表名/裸索引名
+    expect(sql).not.toMatch(/ALTER TABLE (letters|letter_recipients)\b/);
     expect(sql).not.toMatch(
       /CREATE TABLE IF NOT EXISTS (users|user_2fa|letters|letter_recipients|contacts|system_settings)[ (]/,
     );
@@ -119,14 +121,32 @@ describe("schema_v1 迁移（历史塌缩后的最终 schema）", () => {
     expect(names("index", true)).toEqual([
       "idx_post_contacts_user_email",
       "idx_post_letter_recipients_letter",
+      "idx_post_letters_status_next_attempt",
       "idx_post_letters_status_send_at",
       "idx_post_letters_user_status",
     ]);
   });
 
-  it("幂等（CREATE IF NOT EXISTS 可重复执行）", () => {
-    const db = freshDb("post_");
-    expect(() => db.exec(schemaSql("post_"))).not.toThrow();
+  it("schema_v1 的建表语句可重复执行；增量 ALTER 列由账本保证只跑一次", () => {
+    const v1 = getMigrations("post_")[0]!;
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(v1.sql);
+    expect(() => db.exec(v1.sql)).not.toThrow();
+
+    // ALTER TABLE ADD COLUMN 本身不幂等 —— 幂等由迁移账本承担
+    // （见 migrations.test.ts 的「第二跑：全部 skipped，且 schema 无任何变化」）。
+    const incremental = getMigrations("post_").slice(1);
+    expect(incremental.map((m) => m.name)).toEqual([
+      "schema_v2",
+      "schema_v3",
+      "schema_v4",
+      "schema_v5",
+      "schema_v6",
+    ]);
+    for (const migration of incremental) {
+      expect(migration.sql.trim().endsWith(";")).toBe(true);
+    }
   });
 
   it("外键级联与 CHECK 约束在带前缀建表下仍生效", () => {
@@ -160,6 +180,10 @@ describe("迁移建出的表名与 queries 引用的表名一致", () => {
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "applied" },
       { name: "schema_v2", status: "applied" },
+      { name: "schema_v3", status: "applied" },
+      { name: "schema_v4", status: "applied" },
+      { name: "schema_v5", status: "applied" },
+      { name: "schema_v6", status: "applied" },
     ]);
 
     const created = (env.DB as unknown as SqliteD1).db

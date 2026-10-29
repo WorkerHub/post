@@ -583,10 +583,13 @@ lettersRoutes.post("/:id/resend", async (c) => {
   }
 
   // attempts 归零回 scheduled；只补发失败的收件人（已成功的保留，不重复投递）。
+  // 节流补遗 §3.2.2：手动重发同时清空限流退避状态，与清 attempts 同口径。
   await updateLetter(c.env.DB, getTablePrefix(c.env), id, {
     status: "scheduled",
     attempts: 0,
     last_error: null,
+    next_attempt_at: null,
+    throttle_attempts: 0,
   });
   await resetFailedRecipientsForResend(c.env.DB, getTablePrefix(c.env), id);
 

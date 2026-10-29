@@ -79,6 +79,10 @@ export interface Letter {
   attempts: number;
   last_error: string | null;
   sent_at: string | null;
+  /** 节流补遗 §3.2：限流退避的下次可尝试时刻（UTC ISO，可空）；空 = 可尝试 */
+  next_attempt_at: string | null;
+  /** 节流补遗 §3.2：限流类错误计数（不退避计入 attempts） */
+  throttle_attempts: number;
   created_at: string;
   updated_at: string;
 }
@@ -93,6 +97,8 @@ export interface LetterRecipient {
   status: "pending" | "sent" | "failed";
   error: string | null;
   sent_at: string | null;
+  /** 节流补遗 §3.3：该副本投递时使用的 Message-ID（成功后落库，可空） */
+  message_id: string | null;
 }
 
 export interface Contact {

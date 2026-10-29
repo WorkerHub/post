@@ -11,6 +11,7 @@ import { lettersRoutes } from "./routes/letters";
 import { contactsRoutes } from "./routes/contacts";
 import { publicRoutes } from "./routes/public";
 import { adminSmtpRoutes } from "./routes/admin-smtp";
+import { adminSendThrottleRoutes } from "./routes/admin-send-throttle";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { wakerCallbackRoutes } from "./routes/waker-callback";
 import { processDueLetters } from "./services/scheduler";
@@ -61,6 +62,8 @@ app.route("/api/letters", lettersRoutes);
 app.route("/api/contacts", contactsRoutes);
 app.route("/api/public", publicRoutes);
 app.route("/api/admin/settings", adminSmtpRoutes);
+// 发信节流参数（节流补遗 §3.1.4）：v1 无设置页 UI，只开后端接口。
+app.route("/api/admin/settings", adminSendThrottleRoutes);
 // ONE-319 管理后台维护接口：升级数据库 + setup 页面开关（管理员会话鉴权）。
 app.route("/api/admin", adminSystemRoutes);
 app.route("/api/admin", adminRoutes);
@@ -90,8 +93,9 @@ app.get("*", async (c) => {
 });
 
 /**
- * 定时任务入口（cron 每 5 分钟一次，见 wrangler.toml）。
+ * 原生 cron 入口（当前已无 [triggers]，保留给重新启用定时触发的场景）。
  * SPEC §5：扫 status='scheduled' AND send_at<=now，D1 状态抢占 + 逐收件人投递。
+ * 无平台回调上下文，单轮预算走 scheduler 的 30 秒兜底（节流补遗 §3.1.3）。
  */
 export async function handleScheduled(env: Env): Promise<void> {
   try {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { makeEnv } from "./helpers";
+import { makeEnv, setSendThrottleConfig } from "./helpers";
 import { app } from "../src/index";
 import { tables, type Env, type Letter } from "../src/types";
 import { DUE_LETTERS_JOB, wakerExecutionsTable } from "../src/services/waker-callback";
@@ -287,9 +287,13 @@ describe("waker 回调：同步执行 processDueLetters 并返回统计", () => 
     // 统计口径 = processDueLetters 的返回值
     expect(body.stats).toEqual({
       scanned: 1,
+      claimed: 1,
       delivered: 1,
       partialFailed: 0,
-      gaveUp: 0,
+      failed: 0,
+      throttled: 0,
+      deferred_by_cap: 0,
+      paused_until: null,
     });
     // 业务真的跑完了：SMTP 被调用、信已置 sent（不是「先 2xx 再异步发」）
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
@@ -304,6 +308,7 @@ describe("waker 回调：同步执行 processDueLetters 并返回统计", () => 
 
   it("多封信 + 部分失败：统计与口一致（scanned / delivered / partialFailed）", async () => {
     const env = signingEnv();
+    await setSendThrottleConfig(env);
     await seedLetter(env, [{ id: "r1", email: "good@example.com" }], { id: "l-ok" });
     await seedLetter(
       env,
@@ -324,13 +329,34 @@ describe("waker 回调：同步执行 processDueLetters 并返回统计", () => 
     expect(status).toBe(200);
     expect(body.stats).toEqual({
       scanned: 2,
+      claimed: 2,
       delivered: 1,
       partialFailed: 1,
-      gaveUp: 0,
+      failed: 0,
+      throttled: 0,
+      deferred_by_cap: 0,
+      paused_until: null,
     });
     expect(await letterStatus(env, "l-ok")).toBe("sent");
     // 部分失败的信回到 scheduled，attempts+1（投递语义未改）
     expect(await letterStatus(env, "l-partial")).toBe("scheduled");
+  });
+
+  it("回调体里的 timeoutSeconds 决定本轮预算：预算不够时只发首封、其余顺延", async () => {
+    const env = signingEnv();
+    await setSendThrottleConfig(env);
+    await seedLetter(env, [{ id: "r1", email: "first@example.com" }], { id: "l1" });
+    await seedLetter(env, [{ id: "r2", email: "second@example.com" }], { id: "l2" });
+
+    const { status, body } = await postCallback(env, {
+      bodyOverrides: { timeoutSeconds: 1 },
+    });
+
+    expect(status).toBe(200);
+    expect(body.stats.claimed).toBe(1);
+    expect(body.stats.deferred_by_cap).toBe(1);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(await letterStatus(env, "l2")).toBe("scheduled");
   });
 
   it("未到期的信不会被这次回调发出去（扫描口径不变）", async () => {

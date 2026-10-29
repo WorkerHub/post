@@ -23,12 +23,44 @@ export interface SmtpMessage {
   from: string;
   /** Display name for the From header (optional). */
   fromName?: string;
+  /**
+   * 显式 Message-ID（含尖括号）。节流补遗 §3.3 要求每收件人副本一个唯一值，
+   * 由 services/email.ts 生成后传下；不传时退回 `<ts.rand@From 域名>`。
+   */
+  messageId?: string;
+  /** 附加邮件头（如 `X-Someday-Letter-Id`）；头名与头值里的 CRLF 会被剔除。 */
+  extraHeaders?: Record<string, string>;
+}
+
+/**
+ * SMTP 回复码不符合预期时抛出：把回复码与原文一并带回，供限流分类
+ * （services/send-throttle.ts 的 classifySendFailure）使用，不靠解析错误串猜。
+ */
+export class SmtpResponseError extends Error {
+  readonly code: number;
+  readonly response: string;
+
+  constructor(expected: number, actual: number, response: string) {
+    super(`SMTP: expected ${expected}, got ${actual} — ${response}`);
+    this.name = "SmtpResponseError";
+    this.code = actual;
+    this.response = response;
+  }
+}
+
+export interface SmtpSendResult {
+  success: boolean;
+  error?: string;
+  /** 失败时的 SMTP 回复码（对话层拒绝才有） */
+  code?: number;
+  /** 失败时的 SMTP 回复原文 */
+  response?: string;
 }
 
 export async function sendSmtpMessage(
   config: SmtpTransportConfig,
   message: SmtpMessage,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<SmtpSendResult> {
   const from = message.from || "noreply@example.com";
   const fromName = (message.fromName || "someday").replace(/[\r\n]/g, "");
   const isImplicitTls = config.port === 465;
@@ -63,14 +95,24 @@ export async function sendSmtpMessage(
       message.to,
       message.subject,
       message.html,
+      { messageId: message.messageId, extraHeaders: message.extraHeaders },
     );
     await session.quit();
 
     return { success: true };
   } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    if (err instanceof SmtpResponseError) {
+      return {
+        success: false,
+        error: `SMTP error: ${detail}`,
+        code: err.code,
+        response: err.response,
+      };
+    }
     return {
       success: false,
-      error: `SMTP error: ${err instanceof Error ? err.message : String(err)}`,
+      error: `SMTP error: ${detail}`,
     };
   } finally {
     await socket.close().catch(() => {});
@@ -124,6 +166,10 @@ export class SmtpSession {
     to: string,
     subject: string,
     html: string,
+    options: {
+      messageId?: string;
+      extraHeaders?: Record<string, string>;
+    } = {},
   ): Promise<void> {
     await this.cmd(`MAIL FROM:<${from}>`);
     await this.expect(250);
@@ -133,7 +179,8 @@ export class SmtpSession {
     await this.expect(354);
 
     const date = new Date().toUTCString();
-    const msgId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@post>`;
+    const msgId = options.messageId ?? defaultMessageId(from);
+    const extraHeaders = formatExtraHeaders(options.extraHeaders);
     const b64Body = wrapBase64(encodeUtf8Base64(html));
     const encodedSubject = `=?UTF-8?B?${encodeUtf8Base64(subject)}?=`;
 
@@ -143,6 +190,7 @@ export class SmtpSession {
       `Subject: ${encodedSubject}\r\n` +
       `Date: ${date}\r\n` +
       `Message-ID: ${msgId}\r\n` +
+      extraHeaders +
       `MIME-Version: 1.0\r\n` +
       `Content-Type: text/html; charset=UTF-8\r\n` +
       `Content-Transfer-Encoding: base64\r\n` +
@@ -165,9 +213,7 @@ export class SmtpSession {
   async expect(code: number): Promise<void> {
     const resp = await this.readResponse();
     if (resp.code !== code) {
-      throw new Error(
-        `SMTP: expected ${code}, got ${resp.code} — ${resp.message}`,
-      );
+      throw new SmtpResponseError(code, resp.code, resp.message);
     }
   }
 
@@ -205,4 +251,35 @@ export function encodeUtf8Base64(str: string): string {
 
 export function wrapBase64(b64: string): string {
   return b64.match(/.{1,76}/g)?.join("\r\n") ?? b64;
+}
+
+/** From 地址的域名部分（拿不到时回退 localhost，避免生成 `@` 结尾的畸形 ID）。 */
+export function senderDomain(from: string): string {
+  const at = from.lastIndexOf("@");
+  const domain = at >= 0 ? from.slice(at + 1).trim() : "";
+  return domain || "localhost";
+}
+
+/** 未显式给 Message-ID 时的默认形态（域名取 From 地址域名，不用写死的值）。 */
+export function defaultMessageId(from: string): string {
+  return `<${Date.now()}.${Math.random().toString(36).slice(2)}@${senderDomain(from)}>`;
+}
+
+const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
+
+/** 附加头序列化：剔除 CRLF，非法头名直接丢弃（防头注入）。 */
+export function formatExtraHeaders(
+  headers: Record<string, string> | undefined,
+): string {
+  if (headers === undefined) return "";
+  let out = "";
+  for (const [name, value] of Object.entries(headers)) {
+    if (!HEADER_NAME_RE.test(name)) continue;
+    const clean = String(value ?? "")
+      .replace(/[\r\n]+/g, " ")
+      .trim();
+    if (!clean) continue;
+    out += `${name}: ${clean}\r\n`;
+  }
+  return out;
 }
