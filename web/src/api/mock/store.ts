@@ -3,7 +3,7 @@
 import type { Contact } from "../contacts";
 import type { Letter } from "../letters";
 import type { MeProfile } from "../settings";
-import type { AdminUser, SmtpConfig } from "../admin";
+import type { AdminUser, ResendConfig, SmtpConfig } from "../admin";
 
 export interface MockAccount {
   id: string;
@@ -33,6 +33,10 @@ export interface MockState {
   pendingLoginEmail: string | null;
   twofa: MockTwoFa;
   smtp: SmtpConfig;
+  /** Resend 发信渠道（默认 SMTP，与后端缺省一致）。 */
+  resend: ResendConfig;
+  /** mock 内部保存的原始 token（脱敏视图 resend 由它派生，真实后端永不下发原文）。 */
+  resendTokens: Record<string, string>;
   /** setup（GET /api/setup/state）状态：true = 尚未初始化，无任何账号。 */
   setupEnabled: boolean;
   /** setup 页面开关（/api/admin/setup-switch）：false 时 GET /api/setup/state 返回 404。默认 ON。 */
@@ -53,6 +57,14 @@ const DEFAULT_SMTP: SmtpConfig = {
   password_set: false,
   from: "someday@example.com",
   from_name: "时光邮局",
+};
+
+const DEFAULT_RESEND: ResendConfig = {
+  channel: "smtp",
+  from: "",
+  from_name: "",
+  resend_tokens: {},
+  tokens_set: {},
 };
 
 function buildAccounts(): MockAccount[] {
@@ -107,6 +119,8 @@ export const state: MockState = {
   pendingLoginEmail: null,
   twofa: { totp_enabled: false, passkey_enabled: false, pendingTotpSecret: null },
   smtp: { ...DEFAULT_SMTP },
+  resend: { ...DEFAULT_RESEND },
+  resendTokens: {},
   // 默认 mock 场景是「已上线、已有账号」；全新部署用 seedFreshDeployment() 重置。
   setupEnabled: false,
   setupSwitchEnabled: true,
@@ -134,6 +148,8 @@ export function resetMockStore(): void {
   state.pendingLoginEmail = null;
   state.twofa = { totp_enabled: false, passkey_enabled: false, pendingTotpSecret: null };
   state.smtp = { ...DEFAULT_SMTP };
+  state.resend = { ...DEFAULT_RESEND };
+  state.resendTokens = {};
   state.setupEnabled = false;
   state.setupSwitchEnabled = true;
   state.registrationEnabled = true;

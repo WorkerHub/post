@@ -26,6 +26,12 @@ export interface LetterRecipient {
   contact_id: string | null;
   name: string;
   email: string;
+  /** 投递状态（后端 serializeLetter 透出；保存载荷无需提供） */
+  status?: "pending" | "sent" | "failed";
+  /** 投递失败原因（Resend webhook 回写 / SMTP 失败）；保存载荷无需提供 */
+  error?: string | null;
+  /** 实际寄出时刻（UTC ISO）；保存载荷无需提供 */
+  sent_at?: string | null;
 }
 
 /** 保存载荷（POST/PUT /api/letters）。 */

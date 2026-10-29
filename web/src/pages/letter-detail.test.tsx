@@ -134,3 +134,31 @@ describe("信件详情 · 不存在或无权查看", () => {
     expect(screen.queryByText("写给未来的信")).not.toBeInTheDocument();
   });
 });
+
+describe("信件详情 · 收件人投递状态", () => {
+  it("按收件人显示「已送达 / 投递失败」徽标与失败原因", async () => {
+    seedMockLetters([
+      letter({
+        id: "l-status",
+        title: "状态信",
+        status: "sent",
+        recipients: [
+          { contact_id: null, name: "甲", email: EMAIL_SELF, status: "sent" },
+          {
+            contact_id: null,
+            name: "乙",
+            email: "friend@example.com",
+            status: "failed",
+            error: "[resend] 550 5.1.1 user unknown",
+          },
+        ],
+      }),
+    ]);
+    renderDetail("l-status");
+
+    expect(await screen.findByText("状态信")).toBeInTheDocument();
+    expect(screen.getByText("已送达")).toBeInTheDocument();
+    expect(screen.getByText("投递失败")).toBeInTheDocument();
+    expect(screen.getByText("[resend] 550 5.1.1 user unknown")).toBeInTheDocument();
+  });
+});

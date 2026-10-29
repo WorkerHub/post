@@ -289,3 +289,74 @@ describe("系统管理页 · SMTP 表单语义（ONE-370）", () => {
     expect(testForm!.querySelector('input[type="password"]')).toBeNull();
   });
 });
+
+describe("系统管理页 · Resend 发信渠道", () => {
+  it("默认 SMTP；切到 Resend 填域名 token 保存后落库且 token 脱敏回显", async () => {
+    renderAdmin();
+    await screen.findByText("Resend 发信渠道");
+
+    const smtpRadio = screen.getByRole("radio", { name: /现有通道/ });
+    const resendRadio = screen.getByRole("radio", { name: /API 直连/ });
+    expect(smtpRadio).toBeChecked();
+    expect(resendRadio).not.toBeChecked();
+
+    // 切到 Resend + 新增一个域名 token 并保存
+    fireEvent.click(resendRadio);
+    fireEvent.click(screen.getByRole("button", { name: "添加域名" }));
+    fireEvent.change(screen.getByLabelText("发信域名"), {
+      target: { value: "example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Resend API key"), {
+      target: { value: "re_token" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /保存 Resend 配置/ }));
+
+    await waitFor(() => expect(state.resend.channel).toBe("resend"));
+    expect(state.resendTokens["example.com"]).toBe("re_token");
+    // 保存后重新加载，token 明文不回显（脱敏）
+    expect(screen.queryByDisplayValue("re_token")).not.toBeInTheDocument();
+  });
+
+  it("发件身份独立保存：填 Resend 发件邮箱/名称后保存落库并回显", async () => {
+    renderAdmin();
+    await screen.findByText("Resend 发信渠道");
+
+    fireEvent.change(screen.getByLabelText("Resend 发件邮箱"), {
+      target: { value: "notify@someday.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Resend 发件人名称"), {
+      target: { value: "时光邮局" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /保存 Resend 配置/ }));
+
+    await waitFor(() => expect(state.resend.from).toBe("notify@someday.example.com"));
+    expect(state.resend.from_name).toBe("时光邮局");
+  });
+
+  it("删除域名：点删除后保存，该域名从配置中移除", async () => {
+    renderAdmin();
+    await screen.findByText("Resend 发信渠道");
+    fireEvent.click(screen.getByRole("radio", { name: /API 直连/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "添加域名" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加域名" }));
+    const domains = screen.getAllByLabelText("发信域名");
+    const keys = screen.getAllByLabelText("Resend API key");
+    fireEvent.change(domains[0], { target: { value: "a.com" } });
+    fireEvent.change(keys[0], { target: { value: "ta" } });
+    fireEvent.change(domains[1], { target: { value: "b.com" } });
+    fireEvent.change(keys[1], { target: { value: "tb" } });
+    fireEvent.click(screen.getByRole("button", { name: /保存 Resend 配置/ }));
+
+    await waitFor(() => expect(state.resendTokens["a.com"]).toBe("ta"));
+    expect(state.resendTokens["b.com"]).toBe("tb");
+
+    // 重新加载后删掉第一个域名再保存
+    const deleteButtons = await screen.findAllByRole("button", { name: "删除该域名" });
+    fireEvent.click(deleteButtons[0]);
+    fireEvent.click(screen.getByRole("button", { name: /保存 Resend 配置/ }));
+
+    await waitFor(() => expect(state.resendTokens["a.com"]).toBeUndefined());
+    expect(state.resendTokens["b.com"]).toBe("tb");
+  });
+});

@@ -53,7 +53,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     expect(res.body.body_html).not.toContain("<script>");
     expect(res.body.body_html).toContain("<p>正文</p>");
     expect(res.body.recipients).toEqual([
-      { contact_id: null, name: "", email: "friend@example.com" },
+      { contact_id: null, name: "", email: "friend@example.com", status: "pending", error: null, sent_at: null },
     ]);
   });
 
@@ -157,7 +157,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     expect(updated.body.title).toBe("新标题");
     expect(updated.body.status).toBe("scheduled");
     expect(updated.body.recipients).toEqual([
-      { contact_id: null, name: "", email: "other@example.com" },
+      { contact_id: null, name: "", email: "other@example.com", status: "pending", error: null, sent_at: null },
     ]);
   });
 
@@ -397,7 +397,7 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     );
     expect(created.status).toBe(201);
     expect(created.body.recipients).toEqual([
-      { contact_id: contact.body.id, name: "老朋友", email: "old@example.com" },
+      { contact_id: contact.body.id, name: "老朋友", email: "old@example.com", status: "pending", error: null, sent_at: null },
     ]);
 
     await request(

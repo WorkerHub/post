@@ -92,6 +92,10 @@ function serializeLetter(
       contact_id: r.contact_id,
       name: r.name,
       email: r.email,
+      // 投递状态透出（Resend webhook 回写结果靠它可见；SMTP 通道同样受益）
+      status: r.status,
+      error: r.error,
+      sent_at: r.sent_at,
     })),
   };
 }

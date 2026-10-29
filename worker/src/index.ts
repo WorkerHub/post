@@ -11,9 +11,11 @@ import { lettersRoutes } from "./routes/letters";
 import { contactsRoutes } from "./routes/contacts";
 import { publicRoutes } from "./routes/public";
 import { adminSmtpRoutes } from "./routes/admin-smtp";
+import { adminResendRoutes } from "./routes/admin-resend";
 import { adminSendThrottleRoutes } from "./routes/admin-send-throttle";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { wakerCallbackRoutes } from "./routes/waker-callback";
+import { resendWebhookRoutes } from "./routes/resend-webhook";
 import { processDueLetters } from "./services/scheduler";
 import { CALLBACK_MOUNT_PATH } from "./waker";
 
@@ -61,7 +63,11 @@ app.route("/api/settings/me", meRoutes);
 app.route("/api/letters", lettersRoutes);
 app.route("/api/contacts", contactsRoutes);
 app.route("/api/public", publicRoutes);
+// Resend webhook（公开入口，Svix 验签）；置于 /api/* fail-safe 之后、兜底 404 之前。
+app.route("/api/resend/webhook", resendWebhookRoutes);
 app.route("/api/admin/settings", adminSmtpRoutes);
+// Resend 发信渠道（功能单）：渠道二选一 + {域名: token} 配置 + 测试邮件。
+app.route("/api/admin/settings", adminResendRoutes);
 // 发信节流参数（节流补遗 §3.1.4）：v1 无设置页 UI，只开后端接口。
 app.route("/api/admin/settings", adminSendThrottleRoutes);
 // ONE-319 管理后台维护接口：升级数据库 + setup 页面开关（管理员会话鉴权）。

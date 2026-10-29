@@ -1,5 +1,6 @@
 import { MaintenanceSection } from "@/components/settings/maintenance-section";
 import { RegistrationSection } from "@/components/settings/registration-section";
+import { ResendSection } from "@/components/settings/resend-section";
 import { SmtpSection } from "@/components/settings/smtp-section";
 import { UsersSection } from "@/components/settings/users-section";
 import { useAuthStore } from "@/store/auth";
@@ -26,6 +27,7 @@ export default function AdminPage() {
 
       <div className="mt-6 space-y-6">
         <SmtpSection />
+        <ResendSection />
         <RegistrationSection />
         <UsersSection currentUserId={user.id} />
         <MaintenanceSection />

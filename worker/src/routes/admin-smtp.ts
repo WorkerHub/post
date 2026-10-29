@@ -127,10 +127,12 @@ adminSmtpRoutes.post("/smtp/test", async (c) => {
     body && typeof body.email === "string" ? body.email.trim() : "";
 
   // 测试邮件：即时发送并回显成功/错误原文（sendEmail 内部做邮箱/配置校验）。
+  // 显式 channel: "smtp"，保证 SMTP 测试邮件即便后台切到 Resend 也仍走 SMTP 通道。
   const result = await sendEmail(c.env, {
     to: email,
     subject: "时光邮局测试邮件",
     html: "<p>这是一封来自时光邮局的测试邮件。如果你收到了它，说明 SMTP 配置正确。</p>",
+    channel: "smtp",
   });
 
   if (!result.success) {

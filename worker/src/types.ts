@@ -15,6 +15,11 @@ export interface Env {
    * 未配置时回调入口 fail closed（500 `signing_key_missing`），不影响其它路由。
    */
   WAKER_SIGNING_KEY?: string;
+  /**
+   * Resend webhook 的 Svix 签名密钥（whsec_…）：只来自 secrets，绝不进 [vars]、不进仓库。
+   * 未配置时 `/api/resend/webhook` fail closed（401），不影响其它路由。
+   */
+  RESEND_WEBHOOK_SECRET?: string;
 }
 
 export type HonoEnv = {

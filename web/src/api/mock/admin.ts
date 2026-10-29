@@ -3,6 +3,7 @@ import type {
   AdminApi,
   AdminUser,
   DbUpgradeResult,
+  ResendPatch,
   SetupSwitchState,
   SmtpPatch,
   SmtpTestResult,
@@ -57,6 +58,55 @@ export const mockAdminApi: AdminApi = {
       success: true,
       message: `测试邮件已通过 ${state.smtp.host}:${state.smtp.port} 发出，请查收 ${email.trim()}`,
     };
+  },
+  async getResend() {
+    // 脱敏：永不下发 token 明文（resend_tokens 恒为空串，tokens_set 标记是否已配）
+    return {
+      channel: state.resend.channel,
+      from: state.resend.from,
+      from_name: state.resend.from_name,
+      resend_tokens: Object.fromEntries(
+        Object.keys(state.resend.resend_tokens).map((d) => [d, ""]),
+      ),
+      tokens_set: { ...state.resend.tokens_set },
+    };
+  },
+  async updateResend(patch: ResendPatch) {
+    state.resend.channel = patch.channel;
+    if (patch.from !== undefined) state.resend.from = patch.from;
+    if (patch.from_name !== undefined) state.resend.from_name = patch.from_name;
+    if (patch.resend_tokens) {
+      // 以本次提交的域名键整体重建：缺失键 = 删除；留空 = 保留存量；非空 = 覆盖。
+      const nextTokens: Record<string, string> = {};
+      for (const [domain, token] of Object.entries(patch.resend_tokens)) {
+        const d = domain.trim();
+        if (!d) continue;
+        const trimmed = (token ?? "").trim();
+        if (trimmed === "") {
+          // 留空 = 不改（对齐 SMTP 密码口径）：保留存量 token（若存在）
+          const keep = state.resendTokens[d];
+          if (keep) nextTokens[d] = keep;
+        } else {
+          nextTokens[d] = trimmed;
+        }
+      }
+      state.resendTokens = nextTokens;
+      state.resend.resend_tokens = Object.fromEntries(
+        Object.keys(nextTokens).map((d) => [d, ""]),
+      );
+      state.resend.tokens_set = Object.fromEntries(
+        Object.keys(nextTokens).map((d) => [d, true]),
+      );
+    }
+  },
+  async testResend(email): Promise<SmtpTestResult> {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      throw new Error("收件邮箱格式不正确");
+    }
+    if (state.resend.channel !== "resend" || Object.keys(state.resend.tokens_set).length === 0) {
+      return { success: false, message: "Resend 未配置：请先在配置页填写 API key 并切换到 Resend" };
+    }
+    return { success: true, message: `测试邮件已通过 Resend 发出，请查收 ${email.trim()}` };
   },
   async listUsers(): Promise<AdminUser[]> {
     return state.accounts.map(toAdminUser);
