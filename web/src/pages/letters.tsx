@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { isEditableStatus, statusBadgeClass } from "@/lib/letter-status";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 
@@ -40,20 +41,6 @@ function viewMatches(key: ViewKey, status: LetterStatus): boolean {
       return status === "sent";
     case "failed":
       return status === "failed";
-  }
-}
-
-function statusBadgeClass(status: LetterStatus): string | undefined {
-  switch (status) {
-    case "scheduled":
-    case "sending":
-      return "border-seal-500/30 bg-seal-500/10 text-seal-600";
-    case "failed":
-      return "border-[#9a2f22]/30 bg-[#9a2f22]/10 text-[#9a2f22]";
-    case "sent":
-      return "border-paper-300 bg-paper-100 text-ink-600";
-    default:
-      return undefined;
   }
 }
 
@@ -81,7 +68,7 @@ function LetterCard({
   if (letter.recipients.length > 0) {
     meta.push(`收件人 ${letter.recipients.length} 位`);
   }
-  const editable = letter.status === "draft" || letter.status === "cancelled" || letter.status === "scheduled";
+  const editable = isEditableStatus(letter.status);
 
   return (
     <Card>
@@ -89,18 +76,13 @@ function LetterCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              {editable ? (
-                <Link
-                  to={`/compose/${letter.id}`}
-                  className="font-serif text-base font-semibold text-ink-900 hover:text-seal-600 hover:underline"
-                >
-                  {letter.title || "（无标题）"}
-                </Link>
-              ) : (
-                <span className="font-serif text-base font-semibold text-ink-900">
-                  {letter.title || "（无标题）"}
-                </span>
-              )}
+              {/* 可编辑 → 编辑器；不可编辑（已寄出/失败/发送中）→ 只读详情页 */}
+              <Link
+                to={editable ? `/compose/${letter.id}` : `/letters/${letter.id}`}
+                className="font-serif text-base font-semibold text-ink-900 hover:text-seal-600 hover:underline"
+              >
+                {letter.title || "（无标题）"}
+              </Link>
               <Badge className={statusBadgeClass(letter.status)}>
                 {LETTER_STATUS_LABEL[letter.status]}
               </Badge>

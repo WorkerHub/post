@@ -7,6 +7,7 @@ import { SessionBootstrap } from "@/components/session-bootstrap";
 import AdminPage from "@/pages/admin";
 import AboutPage from "@/pages/about";
 import ContactsPage from "@/pages/contacts";
+import LetterDetailPage from "@/pages/letter-detail";
 import LettersPage from "@/pages/letters";
 import LoginPage from "@/pages/login";
 import PublicWallPage from "@/pages/public-wall";
@@ -37,6 +38,8 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route element={<RequireAuth />}>
             <Route path="/letters" element={<LettersPage />} />
+            {/* 只读详情：已寄出/失败/发送中的信只能看不能改，入口是工作台卡片标题 */}
+            <Route path="/letters/:id" element={<LetterDetailPage />} />
             <Route path="/compose/:id?" element={<ComposePage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
