@@ -130,8 +130,8 @@ export async function readSendThrottleConfig(
 
 export type SendFailureKind = "throttle" | "permanent" | "other";
 
-/** 限流类回复码：临时性拒绝/限流（4yz，421 = 服务暂不可用）。 */
-const THROTTLE_CODES = new Set([421, 450, 451, 452]);
+/** 限流类回复码：临时性拒绝/限流（4yz，421 = 服务暂不可用；429 = Resend HTTP 限流）。 */
+const THROTTLE_CODES = new Set([421, 450, 451, 452, 429]);
 
 /** 永久类回复码：收件人/地址类 5xx，重试无意义。 */
 const PERMANENT_CODES = new Set([550, 551, 553]);
@@ -153,6 +153,8 @@ export interface SendFailureInput {
   code?: number | null;
   /** 错误原文（SMTP 回复文本 + 前置说明） */
   text?: string | null;
+  /** 结果来自 HTTP 通道（Resend）时置 true：按 HTTP 码语义分类（429 限流 / 4xx 永久 / 5xx 临时） */
+  http?: boolean;
 }
 
 export interface SendFailureClassification {
@@ -190,6 +192,14 @@ export function classifySendFailure(
     typeof input.code === "number" && Number.isInteger(input.code)
       ? input.code
       : extractSmtpCode(text);
+
+  // HTTP 通道（Resend）按 HTTP 码语义分类：429 → throttle；其它 4xx → permanent；5xx → other（可重试）。
+  // 独立分支避免与 SMTP 的 4xx（临时性）语义混淆。
+  if (input.http === true && code !== null) {
+    if (code === 429) return { kind: "throttle", code, text };
+    if (code >= 400 && code < 500) return { kind: "permanent", code, text };
+    return { kind: "other", code, text };
+  }
 
   if (code !== null && THROTTLE_CODES.has(code)) {
     return { kind: "throttle", code, text };

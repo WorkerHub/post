@@ -54,6 +54,22 @@ export interface SmtpTestResult {
   message: string;
 }
 
+/** Resend 发信渠道配置（管理员二选一）：token 脱敏返回（永不明文下发）。 */
+export interface ResendConfig {
+  /** 实际发信渠道：SMTP（默认，与现有行为零变化）或 Resend。 */
+  channel: "smtp" | "resend";
+  /** 脱敏：{域名: ""}；域名对应 Resend 已验证的发信域。 */
+  resend_tokens: Record<string, string>;
+  /** {域名: 是否已配 token}。 */
+  tokens_set: Record<string, boolean>;
+}
+
+/** PUT /api/admin/settings/resend 载荷：resend_tokens 某域名留空表示不改。 */
+export interface ResendPatch {
+  channel: "smtp" | "resend";
+  resend_tokens?: Record<string, string>;
+}
+
 /** db-upgrade 摘要里的一条：键名按后端返回原样（契约只写「...摘要」，不假设键名）。 */
 export interface DbUpgradeSummaryItem {
   label: string;
@@ -98,6 +114,10 @@ export interface AdminApi {
   getSmtp(): Promise<SmtpConfig>;
   updateSmtp(patch: SmtpPatch): Promise<void>;
   testSmtp(email: string): Promise<SmtpTestResult>;
+  /** Resend 发信渠道：读取渠道 + {域名: token}（脱敏）。 */
+  getResend(): Promise<ResendConfig>;
+  updateResend(patch: ResendPatch): Promise<void>;
+  testResend(email: string): Promise<SmtpTestResult>;
   listUsers(): Promise<AdminUser[]>;
   approveUser(id: string): Promise<void>;
   /** 更新角色 / 禁用启用（PATCH，后端 PUT 兼容）。 */
@@ -155,6 +175,37 @@ export const httpAdminApi: AdminApi = {
     // 后端成功时只回 { success: true }（无 message）；失败时回 { success: false, error }。
     if (body?.success === false) {
       return { success: false, message: body.error ?? "SMTP error" };
+    }
+    return { success: true, message: "测试邮件已发送，请查收收件箱" };
+  },
+  async getResend() {
+    const res = await fetch("/api/admin/settings/resend");
+    if (!res.ok) throw await parseError(res);
+    return (await res.json()) as ResendConfig;
+  },
+  async updateResend(patch) {
+    const res = await fetch("/api/admin/settings/resend", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw await parseError(res);
+  },
+  async testResend(email) {
+    const res = await fetch("/api/admin/settings/resend/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const body = (await res.json().catch(() => null)) as {
+      success?: boolean;
+      error?: string;
+    } | null;
+    if (!res.ok) {
+      throw new Error(body?.error || `${res.status}`);
+    }
+    if (body?.success === false) {
+      return { success: false, message: body.error ?? "Resend error" };
     }
     return { success: true, message: "测试邮件已发送，请查收收件箱" };
   },

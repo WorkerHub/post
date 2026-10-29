@@ -6,6 +6,7 @@ import {
   senderDomain,
   sendSmtpMessage,
 } from "./smtp-transport";
+import { MAIL_CHANNEL_KEY, sendResendEmail } from "./resend";
 
 // 系统邮件抽象（SPEC §2/§5，照 eNotify 现行 main `services/email.ts` 的系统邮件路径）。
 // 配置读 D1 `system_settings` 的 `smtp_config`（JSON：host/port/username/password/from/from_name）。
@@ -37,12 +38,14 @@ export interface EmailOptions {
 export interface SendEmailResult {
   success: boolean;
   error?: string;
-  /** 本次投递实际使用的 Message-ID（成功时有值，调用方负责落库） */
+  /** 本次投递实际使用的 Message-ID（成功时有值，调用方负责落库）；Resend 通道为 Resend 邮件 id */
   messageId?: string;
-  /** 失败时的 SMTP 回复码（用于限流分类） */
+  /** 失败时的 SMTP 回复码 / Resend HTTP 状态码（用于限流分类） */
   code?: number;
   /** 失败时的 SMTP 回复原文 */
   response?: string;
+  /** 结果来自 HTTP 通道（Resend），`classifySendFailure` 据此按 HTTP 码语义分类 */
+  http?: boolean;
 }
 
 /** id 直接进邮件头，只允许安全字符（杜绝头注入与奇怪的 Message-ID）。 */
@@ -106,6 +109,50 @@ export function isValidSmtpHost(host: string): boolean {
   return /^[A-Za-z0-9._\-:[\]]+$/.test(host);
 }
 
+/**
+ * Resend 通道入口：从 smtp_config 取发件身份（from/from_name，对坏配置宽容），
+ * 校验后交给 `sendResendEmail` 走 Resend API。返回形状与 SMTP 通道一致。
+ */
+async function sendViaResend(
+  env: Env,
+  options: EmailOptions,
+  to: string,
+): Promise<SendEmailResult> {
+  let cfgFrom = "";
+  let cfgFromName = "";
+  const configStr = await getSetting(env.DB, getTablePrefix(env), "smtp_config");
+  if (configStr) {
+    try {
+      const parsed = JSON.parse(configStr) as SMTPConfig;
+      cfgFrom = clean(parsed.from);
+      cfgFromName = clean(parsed.from_name);
+    } catch {
+      /* resend 通道对 smtp_config 宽容：只取 from/from_name，坏配置不阻塞 */
+    }
+  }
+
+  const from = clean(options.from) || cfgFrom;
+  if (!from) {
+    return { success: false, error: "Sender not configured" };
+  }
+  if (hasInjectionChars(from) || !isValidEmail(from)) {
+    return { success: false, error: "Invalid sender address" };
+  }
+  const fromName = clean(options.fromName || cfgFromName || "时光邮局")
+    .replace(/[<>"\r\n]/g, "")
+    .trim();
+  const subject = (options.subject || "").replace(/[\r\n]+/g, " ").trim();
+
+  return sendResendEmail(env, {
+    to,
+    subject,
+    html: options.html,
+    from,
+    fromName: fromName || undefined,
+    letterId: options.letterId,
+  });
+}
+
 export async function sendEmail(
   env: Env,
   options: EmailOptions,
@@ -116,6 +163,14 @@ export async function sendEmail(
   }
   if (hasInjectionChars(to) || !isValidEmail(to)) {
     return { success: false, error: "Invalid recipient email address" };
+  }
+
+  // 渠道分支（对齐 cloud-mail 通道模式）：管理员在后台二选一。缺省 "smtp" 与现有行为逐字节一致；
+  // "resend" 走 Resend API 直连，发件身份（from/from_name）仍读 smtp_config，但 host/port/账号不参与。
+  const channel =
+    (await getSetting(env.DB, getTablePrefix(env), MAIL_CHANNEL_KEY)) ?? "smtp";
+  if (channel === "resend") {
+    return sendViaResend(env, options, to);
   }
 
   const configStr = await getSetting(env.DB, getTablePrefix(env), "smtp_config");

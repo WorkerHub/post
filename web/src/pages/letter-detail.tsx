@@ -140,11 +140,29 @@ export default function LetterDetailPage() {
               {letter.recipients.length === 0 ? (
                 <span className="text-ink-500">未添加收件人</span>
               ) : (
-                <ul className="space-y-1">
+                <ul className="space-y-1.5">
                   {letter.recipients.map((r) => (
-                    <li key={r.email}>
-                      {r.name ? `${r.name} ` : ""}
-                      <span className="text-ink-500">&lt;{r.email}&gt;</span>
+                    <li
+                      key={r.email}
+                      className="flex flex-wrap items-center gap-x-2 gap-y-1"
+                    >
+                      <span>
+                        {r.name ? `${r.name} ` : ""}
+                        <span className="text-ink-500">&lt;{r.email}&gt;</span>
+                      </span>
+                      {r.status === "sent" && (
+                        <Badge className="border-[#3c6e47]/30 bg-[#3c6e47]/10 text-[#3c6e47]">
+                          已送达
+                        </Badge>
+                      )}
+                      {r.status === "failed" && (
+                        <Badge className="border-[#9a2f22]/30 bg-[#9a2f22]/10 text-[#9a2f22]">
+                          投递失败
+                        </Badge>
+                      )}
+                      {r.status === "failed" && r.error && (
+                        <span className="break-all text-xs text-[#9a2f22]">{r.error}</span>
+                      )}
                     </li>
                   ))}
                 </ul>

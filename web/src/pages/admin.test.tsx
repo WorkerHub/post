@@ -289,3 +289,31 @@ describe("系统管理页 · SMTP 表单语义（ONE-370）", () => {
     expect(testForm!.querySelector('input[type="password"]')).toBeNull();
   });
 });
+
+describe("系统管理页 · Resend 发信渠道", () => {
+  it("默认 SMTP；切到 Resend 填域名 token 保存后落库且 token 脱敏回显", async () => {
+    renderAdmin();
+    await screen.findByText("Resend 发信渠道");
+
+    const smtpRadio = screen.getByRole("radio", { name: /现有通道/ });
+    const resendRadio = screen.getByRole("radio", { name: /API 直连/ });
+    expect(smtpRadio).toBeChecked();
+    expect(resendRadio).not.toBeChecked();
+
+    // 切到 Resend + 新增一个域名 token 并保存
+    fireEvent.click(resendRadio);
+    fireEvent.click(screen.getByRole("button", { name: "添加域名" }));
+    fireEvent.change(screen.getByLabelText("发信域名"), {
+      target: { value: "example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Resend API key"), {
+      target: { value: "re_token" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /保存 Resend 配置/ }));
+
+    await waitFor(() => expect(state.resend.channel).toBe("resend"));
+    expect(state.resendTokens["example.com"]).toBe("re_token");
+    // 保存后重新加载，token 明文不回显（脱敏）
+    expect(screen.queryByDisplayValue("re_token")).not.toBeInTheDocument();
+  });
+});

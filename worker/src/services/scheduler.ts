@@ -319,6 +319,7 @@ async function deliverClaimedLetter(
     const classification = classifySendFailure({
       code: result.code ?? null,
       text: result.error ?? "SMTP error",
+      http: result.http === true,
     });
 
     await env.DB.prepare(

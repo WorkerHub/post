@@ -3,6 +3,7 @@ import type {
   AdminApi,
   AdminUser,
   DbUpgradeResult,
+  ResendPatch,
   SetupSwitchState,
   SmtpPatch,
   SmtpTestResult,
@@ -57,6 +58,37 @@ export const mockAdminApi: AdminApi = {
       success: true,
       message: `测试邮件已通过 ${state.smtp.host}:${state.smtp.port} 发出，请查收 ${email.trim()}`,
     };
+  },
+  async getResend() {
+    // 脱敏：永不下发 token 明文（resend_tokens 恒为空串，tokens_set 标记是否已配）
+    return {
+      channel: state.resend.channel,
+      resend_tokens: Object.fromEntries(
+        Object.keys(state.resend.resend_tokens).map((d) => [d, ""]),
+      ),
+      tokens_set: { ...state.resend.tokens_set },
+    };
+  },
+  async updateResend(patch: ResendPatch) {
+    state.resend.channel = patch.channel;
+    if (patch.resend_tokens) {
+      for (const [domain, token] of Object.entries(patch.resend_tokens)) {
+        // 留空 = 不改（对齐 SMTP 密码口径）
+        if (!token || token.trim() === "") continue;
+        state.resendTokens[domain] = token.trim();
+        state.resend.resend_tokens[domain] = "";
+        state.resend.tokens_set[domain] = true;
+      }
+    }
+  },
+  async testResend(email): Promise<SmtpTestResult> {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      throw new Error("收件邮箱格式不正确");
+    }
+    if (state.resend.channel !== "resend" || Object.keys(state.resend.tokens_set).length === 0) {
+      return { success: false, message: "Resend 未配置：请先在配置页填写 API key 并切换到 Resend" };
+    }
+    return { success: true, message: `测试邮件已通过 Resend 发出，请查收 ${email.trim()}` };
   },
   async listUsers(): Promise<AdminUser[]> {
     return state.accounts.map(toAdminUser);
