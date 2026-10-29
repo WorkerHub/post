@@ -6,6 +6,8 @@ export interface FakeSmtpOptions {
   supportsStartTls?: boolean;
   rejectAuth?: boolean;
   rejectRecipient?: boolean;
+  /** 覆盖 RCPT TO 的回复行（如 `452 4.7.0 too many messages`，造限流类临时拒收）。 */
+  recipientReject?: string;
 }
 
 export class FakeSmtpServer {
@@ -135,7 +137,8 @@ export class FakeSmtpServer {
     }
     if (upper.startsWith("RCPT TO")) {
       this.push(
-        this.opts.rejectRecipient ? "550 5.1.1 no such user" : "250 2.1.5 ok",
+        this.opts.recipientReject ??
+          (this.opts.rejectRecipient ? "550 5.1.1 no such user" : "250 2.1.5 ok"),
       );
       return;
     }

@@ -8,7 +8,8 @@
 //   - **幂等**：executionId 由 SDK 的 D1 账本去重，落 someday 自己的 D1（`{prefix}waker_executions`，
 //     见 db/migrations.ts 的 schema_v2）；业务层的 letterId 层状态抢占保持原样，仍是防重最终防线。
 //
-// 投递语义一个字都没动：批次 50、重试上限 3 次、逐收件人独立 RCPT 全在 scheduler.ts 里。
+// 投递语义（节流补遗 §3）：单轮收件人上限 + 封间隔、限流退避与全局熔断、每收件人唯一
+// Message-ID，均在 scheduler.ts；本文件只负责把平台回调的超时预算传下去。
 
 import { getTablePrefix, tbl, type Env } from "../types";
 import {
@@ -44,9 +45,13 @@ export type DueLettersJobOutcome = WakerJobOutcome & { stats: DeliveryStats };
 export function createWakerCallbackReceiver(env: Env) {
   return createWakerReceiver({
     jobs: {
-      [DUE_LETTERS_JOB]: async (): Promise<DueLettersJobOutcome> => {
+      [DUE_LETTERS_JOB]: async (context): Promise<DueLettersJobOutcome> => {
         // 同步跑完再返回：SDK 只在这之后回 2xx，平台据此判定本次执行成功。
-        const stats = await processDueLetters(env);
+        // timeoutSeconds 来自平台任务策略（回调体自带），用来算本轮的时间预算：
+        // 不在被平台判定超时前一刻还在发信（节流补遗 §3.1.3）。
+        const stats = await processDueLetters(env, {
+          timeoutSeconds: context.timeoutSeconds,
+        });
         console.info("waker callback delivery run:", stats);
         return { stats };
       },

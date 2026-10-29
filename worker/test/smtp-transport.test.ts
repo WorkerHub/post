@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   encodeUtf8Base64,
+  formatExtraHeaders,
   sendSmtpMessage,
+  senderDomain,
   wrapBase64,
 } from "../src/services/smtp-transport";
 import { setConnectFactory } from "./stubs/sockets";
@@ -107,6 +109,78 @@ describe("sendSmtpMessage（465 隐式 TLS / STARTTLS / 拒绝明文）", () => 
     expect(Buffer.from(b64, "base64").toString("utf8")).toBe("中文主题");
     expect(wrapBase64("A".repeat(80))).toBe(
       `${"A".repeat(76)}\r\n${"A".repeat(4)}`,
+    );
+  });
+});
+
+// ─── 发信节流补遗 §3.3：Message-ID 与附加头 ────────────────────────────────
+
+describe("Message-ID 与附加头（节流补遗 §3.3）", () => {
+  it("显式 messageId 与附加头原样进信头", async () => {
+    const server = new FakeSmtpServer();
+    server.install();
+
+    const result = await sendSmtpMessage(CONFIG, {
+      ...MESSAGE,
+      messageId: "<sr.letter-1.r1.abc123@example.com>",
+      extraHeaders: { "X-Someday-Letter-Id": "letter-1" },
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(server.message).toContain("Message-ID: <sr.letter-1.r1.abc123@example.com>");
+    expect(server.message).toContain("X-Someday-Letter-Id: letter-1");
+  });
+
+  it("未给 messageId 时默认形态用 From 地址域名（不再写死域名）", async () => {
+    const server = new FakeSmtpServer();
+    server.install();
+
+    await sendSmtpMessage(CONFIG, MESSAGE);
+
+    const line = server.message
+      .split("\r\n")
+      .find((l) => l.startsWith("Message-ID:"));
+    expect(line).toBeDefined();
+    expect(line!).toMatch(/^Message-ID: <[^@]+@example\.com>$/);
+    expect(senderDomain("notify@example.com")).toBe("example.com");
+    expect(senderDomain("no-at-sign")).toBe("localhost");
+  });
+
+  it("附加头里的 CRLF 被剔除，非法头名被丢弃（防头注入）", () => {
+    expect(
+      formatExtraHeaders({
+        "X-Someday-Letter-Id": "l1\r\nBcc: evil@example.com",
+        "Bad Header": "x",
+        Good: "  ",
+      }),
+    ).toBe("X-Someday-Letter-Id: l1 Bcc: evil@example.com\r\n");
+    expect(formatExtraHeaders(undefined)).toBe("");
+  });
+
+  it("限流类拒收（452）把回复码与原文一并带回", async () => {
+    const server = new FakeSmtpServer({
+      recipientReject: "452 4.7.0 too many messages",
+    });
+    server.install();
+
+    const result = await sendSmtpMessage(CONFIG, MESSAGE);
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe(452);
+    expect(result.response).toBe("4.7.0 too many messages");
+    expect(result.error).toContain("got 452");
+  });
+
+  it("永久类拒收（550）同样带回回复码，error 文案与改造前一致", async () => {
+    const server = new FakeSmtpServer({ rejectRecipient: true });
+    server.install();
+
+    const result = await sendSmtpMessage(CONFIG, MESSAGE);
+
+    expect(result.code).toBe(550);
+    expect(result.response).toBe("5.1.1 no such user");
+    expect(result.error).toBe(
+      "SMTP error: SMTP: expected 250, got 550 \u2014 5.1.1 no such user",
     );
   });
 });

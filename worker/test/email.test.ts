@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { makeEnv } from "./helpers";
 import { tables, type Env } from "../src/types";
 import {
+  buildMessageId,
   isValidEmail,
   isValidSmtpHost,
   parsePort,
@@ -155,7 +156,8 @@ describe("sendEmail 输入校验（照 email-notify.ts）", () => {
 
     const result = await sendEmail(env, OPTIONS);
 
-    expect(result).toEqual({ success: true });
+    expect(result.success).toBe(true);
+    expect(result.messageId).toBeTruthy();
     expect(server.connectCalls[0].address).toEqual({
       hostname: "smtp.example.com",
       port: 465,
@@ -194,5 +196,73 @@ describe("校验工具函数", () => {
     expect(parsePort("0")).toBeNull();
     expect(parsePort("70000")).toBeNull();
     expect(parsePort(undefined)).toBeNull();
+  });
+});
+
+// ─── 发信节流补遗 §3.3：每收件人唯一 Message-ID ─────────────────────────────
+
+describe("Message-ID（节流补遗 §3.3）", () => {
+  it("带 letterId/recipientId 时按 <sr.{letter}.{recipient}.{rand}@{From 域名}> 生成并带回", async () => {
+    const env = makeEnv();
+    await setSmtpConfig(env, GOOD_CONFIG);
+    const server = new FakeSmtpServer();
+    server.install();
+
+    const result = await sendEmail(env, {
+      ...OPTIONS,
+      letterId: "letter-1",
+      recipientId: "rec-1",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.messageId).toMatch(
+      /^<sr\.letter-1\.rec-1\.[a-z0-9]+@example\.com>$/,
+    );
+    expect(server.message).toContain(`Message-ID: ${result.messageId}`);
+    expect(server.message).toContain("X-Someday-Letter-Id: letter-1");
+  });
+
+  it("同一封信不同收件人的副本 Message-ID 不同", async () => {
+    const env = makeEnv();
+    await setSmtpConfig(env, GOOD_CONFIG);
+    const server = new FakeSmtpServer();
+    server.install();
+
+    const first = await sendEmail(env, { ...OPTIONS, letterId: "l1", recipientId: "r1" });
+    const second = await sendEmail(env, { ...OPTIONS, letterId: "l1", recipientId: "r2" });
+
+    expect(first.messageId).not.toBe(second.messageId);
+  });
+
+  it("无信件的调用（管理员测试邮件）用通用形态、不带 X-Someday 头", async () => {
+    const env = makeEnv();
+    await setSmtpConfig(env, GOOD_CONFIG);
+    const server = new FakeSmtpServer();
+    server.install();
+
+    const result = await sendEmail(env, OPTIONS);
+
+    expect(result.messageId).toMatch(/^<[^@]+@example\.com>$/);
+    expect(server.message).not.toContain("X-Someday-Letter-Id");
+  });
+
+  it("buildMessageId：id 含非法字符时退回通用形态（防头注入）", () => {
+    expect(buildMessageId("a@b.com", "l1", "r1")).toMatch(/^<sr\.l1\.r1\.[a-z0-9]+@b\.com>$/);
+    expect(buildMessageId("a@b.com", "l\r\n1", "r1")).toMatch(/^<[^@]+@b\.com>$/);
+    expect(buildMessageId("a@b.com")).toMatch(/^<[^@]+@b\.com>$/);
+  });
+
+  it("限流类拒收（452）把 code/response 带到上层，供分类使用", async () => {
+    const env = makeEnv();
+    await setSmtpConfig(env, GOOD_CONFIG);
+    const server = new FakeSmtpServer({ recipientReject: "452 4.7.0 too many messages" });
+    server.install();
+
+    const result = await sendEmail(env, OPTIONS);
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe(452);
+    expect(result.response).toBe("4.7.0 too many messages");
+    expect(result.messageId).toBeUndefined();
   });
 });

@@ -7,6 +7,7 @@ import {
 import {
   getTablePrefix,
   migrationsTable,
+  tables,
   type Env,
 } from "../src/types";
 
@@ -82,6 +83,41 @@ export function jsonInit(
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   };
+}
+
+/**
+ * 写入发信节流参数（`{prefix}system_settings.send_throttle_config`）。
+ * 单测默认把间隔归零（否则一次多收件人投递要真等 4–6 秒），需要验证间隔的用例自行覆盖。
+ */
+export async function setSendThrottleConfig(
+  env: Env,
+  config: Partial<{
+    interval_ms: number;
+    jitter_ms: number;
+    max_recipients_per_run: number;
+  }> = {},
+): Promise<void> {
+  const value = {
+    interval_ms: 0,
+    jitter_ms: 0,
+    max_recipients_per_run: 10,
+    ...config,
+  };
+  await setRawSetting(env, "send_throttle_config", JSON.stringify(value));
+}
+
+/** 直接写任意 `system_settings` 键（用例里造熔断时刻等）。 */
+export async function setRawSetting(
+  env: Env,
+  key: string,
+  value: string,
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO ${tables(env).system_settings} (key, value, updated_at) VALUES (?, ?, '2026-01-01')
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  )
+    .bind(key, value)
+    .run();
 }
 
 /** 从 Set-Cookie 里取出指定 cookie 值 */

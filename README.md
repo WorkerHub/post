@@ -65,9 +65,19 @@ schema 的唯一可信源是 `worker/src/db/migrations.ts` 里按前缀参数化
 | 表名生成入口 | 只经 `worker/src/types.ts` 的 `migrationsTable(prefix)` 一处生成，严禁散落拼接 |
 | 账本结构 | `name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL DEFAULT (unixepoch())` |
 
-**历史已塌缩**：someday 无生产数据，历史不逐级展开，`schema_v1` = 当前业务 schema
-（6 表 + 4 索引）。`schema_v2` 起为增量迁移（当前：`{prefix}waker_executions`，waker 回调的
-执行幂等账本，见下“waker 回调入口”）。
+**历史已塌缩**：someday 无生产数据，历史不逐级展开，`schema_v1` = 业务 schema 基线
+（6 表 + 4 索引）。`schema_v2` 起为增量迁移：
+
+| 迁移 | 内容 |
+| --- | --- |
+| `schema_v2` | `{prefix}waker_executions`（waker 回调的执行幂等账本，见下“waker 回调入口”） |
+| `schema_v3` | `letters.next_attempt_at`（限流退避的下次可尝试时刻） |
+| `schema_v4` | `letters.throttle_attempts`（限流计数器，不占用 `attempts`） |
+| `schema_v5` | `letter_recipients.message_id`（每收件人副本的 Message-ID） |
+| `schema_v6` | 索引 `(status, next_attempt_at, send_at)`（到期扫描的退避过滤） |
+
+`schema_v3`–`v6` 每条**只含一条 DDL**：账本只在整条迁移成功后落账、失败项重跑会重放整条 SQL，
+而 `ALTER TABLE ADD COLUMN` 本身不幂等——单语句拆分才能保证重跑只重试失败的那一条。
 
 **runner 语义**（`worker/src/lib/migrations-runner.ts`，两处 setup 入口共用）：
 
@@ -113,13 +123,31 @@ schema 的唯一可信源是 `worker/src/db/migrations.ts` 里按前缀参数化
 | 回调地址 | `https://someday.oneboy.app/_waker/execute`（SDK 的 `CALLBACK_MOUNT_PATH` + `/execute`） |
 | 任务名 | `deliver-due-letters`（`worker/src/services/waker-callback.ts` 的 `DUE_LETTERS_JOB`，须与 waker 平台里注册的 job 名逐字一致） |
 | 验签 | HMAC-SHA256 覆盖 `timestamp + executionId + jobId + rawBody`，300s 时间窗，由 SDK receiver 完成；未带签名/篡改/过期 → 401，缺 signing key → 500（fail closed） |
-| 执行语义 | handler `await processDueLetters(env)` 跑完才回 2xx，响应体带 `{ stats }`（`scanned` / `delivered` / `partialFailed` / `gaveUp`，口径同 `processDueLetters`）；抛错/DB 不可用 → 5xx，平台重试 |
+| 执行语义 | handler `await processDueLetters(env, { timeoutSeconds })` 跑完才回 2xx，响应体带 `{ stats }`（`scanned` / `claimed` / `delivered` / `partialFailed` / `failed` / `throttled` / `deferred_by_cap` / `paused_until`，口径同 `processDueLetters`）；抛错/DB 不可用 → 5xx，平台重试 |
+| 单轮预算 | 预算取自回调体 `timeoutSeconds`（waker 任务策略，现配置 120 秒），留 10 秒收尾余量；预算或单轮收件人上限用尽即顺延到下一轮，本轮首封必发 |
 | 幂等 | executionId 由 SDK 的 D1 账本去重（`{prefix}waker_executions`，`schema_v2`），重复投递回 2xx + `duplicate:true` + 首响应回放；业务防重仍是 letters 状态抢占（最终防线，未改） |
 
 SDK 是**源码拷贝**（`worker/src/waker/`，来源与版本见该目录 `README.md`），不手改；升级回 waker 仓库改完再整目录重拷。
 签名密钥 `WAKER_SIGNING_KEY` 只走 secrets：线上配 GitHub repository secret，Deploy workflow 写进 `--secrets-file` 注入；本地放 `worker/.dev.vars`（自生成的测试 key）。
 
-**上线先后**：部署后需由管理员跑一次 `POST /api/admin/db-upgrade` 应用 `schema_v2`（新建 `{prefix}waker_executions`）；未跑之前回调会因账本表缺失回 500（cron 仍在，投递不受影响）。
+**上线先后**：部署后需由管理员跑一次 `POST /api/admin/db-upgrade` 应用未落账的迁移（`schema_v2` 新建 `{prefix}waker_executions`；`schema_v3`–`v6` 为发信节流补的新列与索引）。**未跑之前投递扫描会因缺列报错、回调回 5xx**，所以部署后第一件事就是跑一次升级。
+
+### 发信节流（THROTTLING-ADDENDUM §3）
+
+waker 每 5 分钟回调一次，节流把「一轮爆发」摊成「多轮细流」，参数与运行状态都在
+`{prefix}system_settings`：
+
+| 键 | 内容 |
+| --- | --- |
+| `send_throttle_config` | JSON：`interval_ms`（默认 4000，0–30000）、`jitter_ms`（默认 2000，0–10000）、`max_recipients_per_run`（默认 10，1–100）。缺失/字段缺失逐项回默认；非法值回默认并 warn（投递不崩） |
+| `send_paused_until` | 熔断截止时刻（UTC ISO）；未过期时触发的扫描直接跳过发送、不抢占任何信 |
+
+- **间隔 + 单轮上限**：逐收件人串行，本轮第一封不等待，其后每封前等 `interval_ms + random(0, jitter_ms)`（运行时原生 `setTimeout`）；单轮最多处理 `max_recipients_per_run` 个收件人，额度在**抢占之前**生效。信只发了一部分时未发收件人保持 `pending`、信回 `scheduled`（`attempts` 与 `last_error` 不动），绝不卡在 `sending`。
+- **限流退避**：SMTP 回复码 421/450/451/452 或命中限流关键词 → 收件人记 `[throttle:452] ...`、信 `attempts` 不增加、`throttle_attempts+1`、`next_attempt_at` 按 15 → 30 → 60 分钟递增（封顶 60）；退避时刻超过 `send_at + 24h` 直接置 `failed`。第一例限流即停掉本轮剩余发送并写 `send_paused_until`（只由限流类触发）。
+- **永久错误**（550/551/553 等）走原路径：计 `attempts`、达 3 次置 `failed`，不熔断。
+- **成功即清零**：整封发完置 `sent` 并清 `next_attempt_at` / `throttle_attempts`；`POST /api/letters/:id/resend` 也一并清空。
+- **防去重**：每收件人副本一个 Message-ID `<sr.{letter_id}.{recipient_id}.{随机串}@{From 域名}>`（成功后落 `letter_recipients.message_id`），邮件头带 `X-Someday-Letter-Id`，落款追加「信件编号：{letter_id}」。
+- **参数接口**：`GET/PUT /api/admin/settings/send-throttle`（管理员会话，v1 无设置页 UI；PUT 越界/非整数 400，未提供的字段保持当前值）。管理员「发送测试邮件」不走队列，不受上限、间隔与 `send_paused_until` 影响。
 
 ## 校验命令（CI 同款）
 

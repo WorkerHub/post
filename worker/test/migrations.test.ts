@@ -76,7 +76,7 @@ describe("migrationsTable() 命名三态", () => {
 // ─── runner 语义 ─────────────────────────────────────────────────────────────
 
 describe("runMigrations（空库首跑 / 重跑）", () => {
-  it("空库首跑：全部 applied，账本按序记下 schema_v1 / schema_v2，表与索引建好", async () => {
+  it("空库首跑：全部 applied，账本按序记下 schema_v1–schema_v6，表与索引建好", async () => {
     const { env, sqlite } = emptyEnv();
     const result = await runMigrations(env);
 
@@ -84,11 +84,15 @@ describe("runMigrations（空库首跑 / 重跑）", () => {
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "applied" },
       { name: "schema_v2", status: "applied" },
+      { name: "schema_v3", status: "applied" },
+      { name: "schema_v4", status: "applied" },
+      { name: "schema_v5", status: "applied" },
+      { name: "schema_v6", status: "applied" },
     ]);
 
     // 账本按序记下两条迁移
     expect(tableNames(sqlite)).toContain("_post_schema_migrations");
-    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1", "schema_v2"]);
+    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1", "schema_v2", "schema_v3", "schema_v4", "schema_v5", "schema_v6"]);
 
     // 业务表 + 索引都建出来了
     const names = tableNames(sqlite);
@@ -111,9 +115,24 @@ describe("runMigrations（空库首跑 / 重跑）", () => {
     expect(indexes.sort()).toEqual([
       "idx_post_contacts_user_email",
       "idx_post_letter_recipients_letter",
+      "idx_post_letters_status_next_attempt",
       "idx_post_letters_status_send_at",
       "idx_post_letters_user_status",
     ]);
+
+    // schema_v3–v6：节流补遗的新列（迁移后用 PRAGMA 核实列真实存在）
+    const letterCols = sqlite.db
+      .prepare("PRAGMA table_info(post_letters)")
+      .all()
+      .map((r) => (r as { name: string }).name);
+    expect(letterCols).toEqual(
+      expect.arrayContaining(["next_attempt_at", "throttle_attempts"]),
+    );
+    const recipientCols = sqlite.db
+      .prepare("PRAGMA table_info(post_letter_recipients)")
+      .all()
+      .map((r) => (r as { name: string }).name);
+    expect(recipientCols).toContain("message_id");
   });
 
   it("第二跑：全部 skipped，且 schema 无任何变化", async () => {
@@ -124,20 +143,24 @@ describe("runMigrations（空库首跑 / 重跑）", () => {
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "skipped" },
       { name: "schema_v2", status: "skipped" },
+      { name: "schema_v3", status: "skipped" },
+      { name: "schema_v4", status: "skipped" },
+      { name: "schema_v5", status: "skipped" },
+      { name: "schema_v6", status: "skipped" },
     ]);
     expect(schemaSnapshot(sqlite)).toBe(before);
-    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1", "schema_v2"]);
+    expect(ledgerNames(sqlite, "post_")).toEqual(["schema_v1", "schema_v2", "schema_v3", "schema_v4", "schema_v5", "schema_v6"]);
   });
 
   it("自定义前缀与显式空前缀同样走账本", async () => {
     const custom = await emptyEnv("kp_");
     expect((await runMigrations(custom.env)).prefix).toBe("kp_");
-    expect(ledgerNames(custom.sqlite, "kp_")).toEqual(["schema_v1", "schema_v2"]);
+    expect(ledgerNames(custom.sqlite, "kp_")).toEqual(["schema_v1", "schema_v2", "schema_v3", "schema_v4", "schema_v5", "schema_v6"]);
 
     const none = await emptyEnv("");
     expect((await runMigrations(none.env)).prefix).toBe("");
     expect(tableNames(none.sqlite)).toContain("_schema_migrations");
-    expect(ledgerNames(none.sqlite, "")).toEqual(["schema_v1", "schema_v2"]);
+    expect(ledgerNames(none.sqlite, "")).toEqual(["schema_v1", "schema_v2", "schema_v3", "schema_v4", "schema_v5", "schema_v6"]);
     expect(tableNames(none.sqlite)).toContain("users");
   });
 });
@@ -177,6 +200,10 @@ describe("runMigrations 防静默切换（前缀冲突）", () => {
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "skipped" },
       { name: "schema_v2", status: "skipped" },
+      { name: "schema_v3", status: "skipped" },
+      { name: "schema_v4", status: "skipped" },
+      { name: "schema_v5", status: "skipped" },
+      { name: "schema_v6", status: "skipped" },
     ]);
   });
 
@@ -196,6 +223,10 @@ describe("runMigrations 防静默切换（前缀冲突）", () => {
     expect(result.migrations).toEqual([
       { name: "schema_v1", status: "applied" },
       { name: "schema_v2", status: "applied" },
+      { name: "schema_v3", status: "applied" },
+      { name: "schema_v4", status: "applied" },
+      { name: "schema_v5", status: "applied" },
+      { name: "schema_v6", status: "applied" },
     ]);
   });
 });

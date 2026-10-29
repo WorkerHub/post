@@ -328,6 +328,36 @@ describe("letters CRUD 与状态流转（ONE-176）", () => {
     expect(resend.body.last_error).toBeNull();
   });
 
+  it("resend 同时清空限流退避状态（next_attempt_at / throttle_attempts）", async () => {
+    const { env, user } = await setupWithUser();
+
+    const failedLetter = await request(env, "/api/letters", jsonInit("POST", payload(), user));
+    await env.DB.prepare(
+      `UPDATE ${tables(env).letters}
+          SET status = 'failed', attempts = 0, throttle_attempts = 2,
+              next_attempt_at = '2999-01-01T00:00:00.000Z',
+              last_error = '[throttle:452] too many'
+        WHERE id = ?`,
+    )
+      .bind(failedLetter.body.id)
+      .run();
+
+    const resend = await request(env, `/api/letters/${failedLetter.body.id}/resend`, {
+      method: "POST",
+      headers: user,
+    });
+    expect(resend.status).toBe(200);
+    expect(resend.body.status).toBe("scheduled");
+
+    const row = await env.DB.prepare(
+      `SELECT next_attempt_at, throttle_attempts FROM ${tables(env).letters} WHERE id = ?`,
+    )
+      .bind(failedLetter.body.id)
+      .first<{ next_attempt_at: string | null; throttle_attempts: number }>();
+    expect(row!.next_attempt_at).toBeNull();
+    expect(row!.throttle_attempts).toBe(0);
+  });
+
   it("PATCH is_public 任何状态可切（sent 信关闭即时下墙）", async () => {
     const { env, user } = await setupWithUser();
     const created = await request(env, "/api/letters", jsonInit("POST", payload(), user));

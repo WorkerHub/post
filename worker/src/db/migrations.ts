@@ -153,5 +153,29 @@ CREATE TABLE IF NOT EXISTS ${t("waker_executions")} (
 );
 `,
     },
+    // ── 发信节流补遗（THROTTLING-ADDENDUM §3.5）────────────────────────────
+    // schema_v3–v6 每条**只含一条 DDL**：账本只在整条迁移成功后落账，失败项重跑时
+    // 会重放整条 SQL；SQLite 的 ADD COLUMN 本身不幂等，拆成单语句才能保证
+    // 「重跑只重试失败的那一条」而不是撞在已加好的列上。
+    {
+      name: "schema_v3",
+      // 限流退避的下次可尝试时刻（UTC ISO，可空；空 = 可尝试）
+      sql: `ALTER TABLE ${t("letters")} ADD COLUMN next_attempt_at TEXT;`,
+    },
+    {
+      name: "schema_v4",
+      // 限流类错误计数（只按限流退避递增，不占用 attempts）
+      sql: `ALTER TABLE ${t("letters")} ADD COLUMN throttle_attempts INTEGER NOT NULL DEFAULT 0;`,
+    },
+    {
+      name: "schema_v5",
+      // 每收件人副本的唯一 Message-ID（成功投递后落库，供事后追溯）
+      sql: `ALTER TABLE ${t("letter_recipients")} ADD COLUMN message_id TEXT;`,
+    },
+    {
+      name: "schema_v6",
+      // 到期扫描新增的退避过滤条件：按 (status, next_attempt_at, send_at) 取
+      sql: `CREATE INDEX IF NOT EXISTS idx_${t("letters")}_status_next_attempt ON ${t("letters")}(status, next_attempt_at, send_at);`,
+    },
   ];
 }

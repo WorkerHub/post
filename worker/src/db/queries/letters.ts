@@ -26,6 +26,10 @@ export type LetterUpdate = Partial<{
   attempts: number;
   last_error: string | null;
   sent_at: string | null;
+  /** 节流补遗 §3.2：限流退避的下次可尝试时刻（UTC ISO，可空） */
+  next_attempt_at: string | null;
+  /** 节流补遗 §3.2：限流退避计数 */
+  throttle_attempts: number;
 }>;
 
 const LETTER_UPDATE_COLS = new Set([
@@ -39,6 +43,8 @@ const LETTER_UPDATE_COLS = new Set([
   "attempts",
   "last_error",
   "sent_at",
+  "next_attempt_at",
+  "throttle_attempts",
 ]);
 
 export async function listLettersByUser(

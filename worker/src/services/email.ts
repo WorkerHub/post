@@ -1,7 +1,11 @@
 import type { Env } from "../types";
 import { getTablePrefix } from "../types";
 import { getSetting } from "../db/queries/users";
-import { sendSmtpMessage } from "./smtp-transport";
+import {
+  defaultMessageId,
+  senderDomain,
+  sendSmtpMessage,
+} from "./smtp-transport";
 
 // 系统邮件抽象（SPEC §2/§5，照 eNotify 现行 main `services/email.ts` 的系统邮件路径）。
 // 配置读 D1 `system_settings` 的 `smtp_config`（JSON：host/port/username/password/from/from_name）。
@@ -22,6 +26,47 @@ export interface EmailOptions {
   html: string;
   from?: string;
   fromName?: string;
+  /**
+   * 节流补遗 §3.3：给定信件/收件人 id 时生成 `<sr.{letter_id}.{recipient_id}.{随机串}@{From 域名}>`。
+   * 不传（如管理员测试邮件）则走 `<ts.rand@{From 域名}>` 的通用形态。
+   */
+  letterId?: string;
+  recipientId?: string;
+}
+
+export interface SendEmailResult {
+  success: boolean;
+  error?: string;
+  /** 本次投递实际使用的 Message-ID（成功时有值，调用方负责落库） */
+  messageId?: string;
+  /** 失败时的 SMTP 回复码（用于限流分类） */
+  code?: number;
+  /** 失败时的 SMTP 回复原文 */
+  response?: string;
+}
+
+/** id 直接进邮件头，只允许安全字符（杜绝头注入与奇怪的 Message-ID）。 */
+const HEADER_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * 构建每收件人副本的唯一 Message-ID（补遗 §3.3.1）：随机串每次投递唯一，
+ * 同一封信不同收件人、以及补发都不会复用。
+ */
+export function buildMessageId(
+  from: string,
+  letterId?: string,
+  recipientId?: string,
+): string {
+  if (
+    letterId !== undefined &&
+    recipientId !== undefined &&
+    HEADER_ID_RE.test(letterId) &&
+    HEADER_ID_RE.test(recipientId)
+  ) {
+    const rand = Math.random().toString(36).slice(2, 10);
+    return `<sr.${letterId}.${recipientId}.${rand}@${senderDomain(from)}>`;
+  }
+  return defaultMessageId(from);
 }
 
 export interface SMTPConfig {
@@ -64,7 +109,7 @@ export function isValidSmtpHost(host: string): boolean {
 export async function sendEmail(
   env: Env,
   options: EmailOptions,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<SendEmailResult> {
   const to = clean(options.to);
   if (!to) {
     return { success: false, error: "Invalid recipient email address" };
@@ -117,8 +162,14 @@ export async function sendEmail(
 
   // transport 层（connect 在 try 外）可能同步抛错（如非法参数），
   // 这里兜底成 { success: false }，保证调用方永远拿到结果、不会把信卡在 sending。
+  const messageId = buildMessageId(from, options.letterId, options.recipientId);
+  const extraHeaders: Record<string, string> =
+    options.letterId !== undefined && HEADER_ID_RE.test(options.letterId)
+      ? { "X-Someday-Letter-Id": options.letterId }
+      : {};
+
   try {
-    return await sendSmtpMessage(
+    const result = await sendSmtpMessage(
       { host, port, username, password },
       {
         to,
@@ -126,8 +177,20 @@ export async function sendEmail(
         html: options.html,
         from,
         fromName: fromName || undefined,
+        messageId,
+        extraHeaders,
       },
     );
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error,
+        ...(result.code === undefined ? {} : { code: result.code }),
+        ...(result.response === undefined ? {} : { response: result.response }),
+      };
+    }
+    return { success: true, messageId };
   } catch (err) {
     return {
       success: false,
